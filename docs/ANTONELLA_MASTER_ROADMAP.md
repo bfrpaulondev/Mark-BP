@@ -37,6 +37,7 @@ O produto não deve ser apenas um chatbot com comandos. Deve funcionar como um s
 - Permitir habilidades descritas em Markdown e executadas em Python.
 - Aprender por comandos explícitos, feedback e procedimentos aprovados.
 - Controlar o Windows, navegador, aplicações e serviços externos com segurança.
+- Funcionar como copiloto especializado do MetaTrader 5, começando por análise e desenho do método Fimathe PCM e evoluindo para execução confirmada sob políticas independentes de risco.
 - Disponibilizar uma UI/UX completamente nova, moderna, futurista, responsiva e acessível.
 - Ser observável: toda decisão, ferramenta, custo, erro e resultado importante deve poder ser inspecionado.
 
@@ -160,6 +161,56 @@ Papéis recomendados, nunca hardcoded a um modelo específico:
 | `embedding` | indexação e pesquisa semântica |
 
 O catálogo deve ser configurável e atualizado sem alterar o núcleo.
+
+### 4.6 Integração de aplicações locais críticas — MT5
+
+O MetaTrader 5 será o primeiro caso de integração local profunda e servirá como referência para futuras aplicações profissionais. A integração não dependerá primariamente de visão computacional ou coordenadas do rato.
+
+```mermaid
+flowchart TD
+    MT5[MetaTrader 5] --> B[Bridge MQL5]
+    B --> LC[Broker local Antonella]
+    LC --> API[Orquestrador cloud]
+    API --> FE[Motor Fimathe PCM]
+    FE --> RP[Proposta de operação]
+    RP --> RE[Motor independente de risco]
+    RE --> AP[Aprovação de Bruno]
+    AP --> EX[Execução idempotente]
+    EX --> B
+    B --> MT5
+```
+
+Responsabilidades:
+
+- **Bridge MQL5:** ticks, candles, conta, símbolos, posições, ordens, eventos de negociação e objetos do gráfico.
+- **Broker local Antonella:** canal autenticado, allowlist de comandos, confirmação de origem e interrupção imediata.
+- **Conector Python MetaTrader 5:** leitura e validação de dados estruturados; nunca usar pixels como fonte primária de preço.
+- **Motor Fimathe PCM:** regras determinísticas, versionadas e testadas; modelos de linguagem não decidem se uma condição matemática ocorreu.
+- **Renderer MQL5:** cria, atualiza e remove CA, C1, canais, PCM, entradas, stops, alvos e invalidações por preço e tempo.
+- **Visão computacional:** interpreta contexto visual e elementos sem API; funciona como observador e fallback.
+- **Controlo de rato/teclado:** reservado para navegação e ações sem API, sempre com janela, resolução e alvo verificados.
+- **Motor de risco:** componente separado do LLM e da estratégia, capaz de bloquear qualquer ordem.
+- **Execução:** ordem real somente após proposta estruturada, validação e confirmação explícita de uso único.
+
+Modos obrigatórios, promovidos somente após aprovação e evidências:
+
+```text
+observer → drawing → replay → backtest → demo-confirmed → live-confirmed
+```
+
+Não existirá modo live autónomo na primeira versão. O sistema deve impedir tecnicamente que texto produzido por um modelo chegue diretamente a `order_send`.
+
+#### Requisitos Fimathe PCM já conhecidos, ainda sujeitos a especificação formal
+
+- mercado inicial: XAUUSD;
+- timeframe inicial: M1;
+- C1 formada uma única vez no ciclo definido;
+- se o preço retornar e romper o canal na direção oposta à C1, a entrada poderá ocorrer no rompimento da CA sem aguardar novo rompimento da C1;
+- perfil opcional para considerar apenas as três primeiras entradas da abertura diária;
+- bloqueio diário após três perdas consecutivas;
+- regras de consistência, drawdown e elegibilidade para saque devem vir de um perfil versionado da prop firm, nunca de valores espalhados no código.
+
+Estes pontos são requisitos de produto, não uma especificação final da estratégia. Antes da implementação serão definidos exemplos positivos, negativos, ambiguidades, timezone, sessão, formação e reset de estruturas, preços bid/ask, spread, slippage, stops, alvos e critérios de invalidação.
 
 ---
 
@@ -605,6 +656,53 @@ A interface atual será substituída, não apenas retocada.
 - [ ] **ANT-209 — Lançar Antonella v1.0.** Somente após todos os gates obrigatórios.
 - [ ] **ANT-210 — Criar roadmap pós-v1.** Casa inteligente, mobile completo, colaboração e marketplace, conforme evidência de uso.
 
+## Fase 14 — Copiloto MT5 e Fimathe PCM
+
+Esta fase é transversal. Contratos e segurança devem ser preparados desde as Fases 2, 7, 8 e 10; desenho e execução real só avançam depois dos respetivos gates.
+
+- [ ] **ANT-211 — Criar ADR da integração MT5.** Definir limites entre MQL5, broker local, Python, cloud, estratégia, risco, UI e responsabilidades do utilizador.
+- [ ] **ANT-212 — Criar threat model financeiro específico.** Cobrir ordem duplicada, dados atrasados, janela errada, conta errada, prompt injection, perda de rede, spread extremo e credencial comprometida.
+- [ ] **ANT-213 — Formalizar a skill `mt5-fimathe-copilot`.** Criar contrato de Markdown, manifesto, schemas, permissões, riscos, modos e critérios de sucesso.
+- [ ] **ANT-214 — Criar broker local de capacidades críticas.** Expor somente ações MT5 permitidas por canal autenticado, com allowlist, nonce, expiração e auditoria.
+- [ ] **ANT-215 — Descobrir e emparelhar instalações MT5.** Identificar terminal, conta, servidor, modo demo/real e permitir revogação por dispositivo.
+- [ ] **ANT-216 — Implementar conector Python MetaTrader 5.** Ler símbolos, ticks, candles, conta, posições, ordens, histórico e informações de margem.
+- [ ] **ANT-217 — Implementar Bridge/EA MQL5.** Publicar eventos e receber comandos tipados sem bloquear o terminal.
+- [ ] **ANT-218 — Definir schema canónico de mercado e execução.** Normalizar tempo, símbolo, dígitos, volume, bid/ask, OHLCV, ticket, posição e retcodes.
+- [ ] **ANT-219 — Implementar streaming resiliente de ticks e candles.** Sequência, heartbeat, deteção de lacunas, backfill e reconexão.
+- [ ] **ANT-220 — Normalizar relógio, sessão e timezone.** Distinguir tempo do broker, UTC, Lisboa, abertura diária e horário de verão.
+- [ ] **ANT-221 — Especificar formalmente o Fimathe PCM.** Documentar CA, C1, PCM, canal, ciclos, resets, rompimentos, retornos, filtros, entradas e invalidações sem ambiguidades.
+- [ ] **ANT-222 — Consolidar regras provisórias já fornecidas.** Validar XAUUSD M1, C1 única, reversão por canal/CA, três primeiras entradas e três perdas consecutivas com exemplos desenhados.
+- [ ] **ANT-223 — Criar motor determinístico Fimathe PCM.** Funções puras e máquina de estados; nenhuma condição de entrada depende da opinião do LLM.
+- [ ] **ANT-224 — Versionar estratégia e parâmetros.** Cada análise, desenho, teste e ordem aponta para versão imutável das regras.
+- [ ] **ANT-225 — Implementar renderer de objetos MQL5.** Traçar CA, C1, PCM, canais, entrada, stop, alvo e invalidação por coordenadas de preço/tempo.
+- [ ] **ANT-226 — Sincronizar objetos e estado.** IDs estáveis, atualização incremental, limpeza por ciclo e proteção contra duplicados.
+- [ ] **ANT-227 — Implementar captura visual do MT5.** Screenshot da janela correta, OCR e visão para contexto, evidência e elementos não expostos por API.
+- [ ] **ANT-228 — Implementar controlo verificado de rato e teclado.** Confirmar processo, janela, monitor, escala e alvo antes de cada ação; abortar se o contexto mudar.
+- [ ] **ANT-229 — Criar schema de proposta de operação.** Direção, entrada, stop, alvo, volume, risco, validade, setup, evidências, versão e motivo de invalidação.
+- [ ] **ANT-230 — Criar motor independente de risco.** Bloquear por drawdown, perda diária, perdas consecutivas, volume, margem, spread, slippage, sessão, notícias configuradas e exposição.
+- [ ] **ANT-231 — Criar perfis versionados de broker e prop firm.** Regras não ficam hardcoded; cada alteração exige revisão e data de vigência.
+- [ ] **ANT-232 — Integrar cálculo e pré-validação de ordens.** Calcular margem/lucro esperado, normalizar volume e usar validação do MT5 antes da confirmação.
+- [ ] **ANT-233 — Criar confirmação financeira forte.** Mostrar conta, ativo, lado, lote, risco, stop e alvo; autorização de uso único com TTL e vínculo ao hash da proposta.
+- [ ] **ANT-234 — Implementar envio idempotente de ordens.** Idempotency key, estado transacional e reconciliação antes de qualquer repetição.
+- [ ] **ANT-235 — Monitorizar execução e posições.** Processar resultados, retcodes, fills, rejeições, parciais, modificações e encerramentos.
+- [ ] **ANT-236 — Implementar kill switch financeiro.** Bloquear novas ordens e cancelar ações pendentes por voz, UI, hotkey ou perda de integridade.
+- [ ] **ANT-237 — Implementar modos com permissões separadas.** Observer, drawing, replay, backtest, demo-confirmed e live-confirmed sem promoção automática.
+- [ ] **ANT-238 — Criar motor de replay determinístico.** Reproduzir ticks/candles históricos sem look-ahead e com relógio controlado.
+- [ ] **ANT-239 — Criar adaptador de backtest.** Executar a mesma versão da estratégia usada no live, incluindo spread, comissão, slippage e regras da conta.
+- [ ] **ANT-240 — Criar protocolo de forward test em demo.** Duração mínima, número de operações, estabilidade, divergência entre sinal e execução e critérios de reprovação.
+- [ ] **ANT-241 — Criar dataset dourado Fimathe PCM.** Casos corretos, incorretos, reversões, gaps, spreads anormais e screenshots anotados por Bruno.
+- [ ] **ANT-242 — Criar evals da estratégia e desenho.** Medir identificação, linhas, entradas, falsos positivos, falsos negativos e regressão por versão.
+- [ ] **ANT-243 — Criar testes de falha operacional.** Terminal fechado, conta trocada, feed congelado, rede interrompida, ordem rejeitada e reinício durante posição aberta.
+- [ ] **ANT-244 — Criar diário de trading no Supabase.** Guardar proposta, decisão, aprovação, eventos, imagens, resultado e lições com RLS e retenção.
+- [ ] **ANT-245 — Criar Trading Cockpit na UI.** Gráfico/estado, setup, risco, proposta, aprovação, posição, limites diários, ligação e kill switch.
+- [ ] **ANT-246 — Criar comandos de voz seguros para trading.** Analisar e desenhar livremente; confirmar, modificar e fechar exigem desafio-resposta inequívoco.
+- [ ] **ANT-247 — Separar explicação de decisão.** O LLM narra e contextualiza; estratégia e risco fornecem os factos estruturados e bloqueios.
+- [ ] **ANT-248 — Instrumentar latência ponta a ponta.** Tick → estado → desenho → aviso → confirmação → envio → fill, com relógios sincronizados.
+- [ ] **ANT-249 — Criar política de privacidade e redação financeira.** Não expor número completo da conta, saldo, credenciais ou histórico sensível a providers e logs desnecessários.
+- [ ] **ANT-250 — Definir gates de ativação real.** Live exige estratégia formal aprovada, testes verdes, replay, backtest, forward test demo, limites de risco, kill switch e confirmação manual.
+
+**Gate da fase:** a Antonella identifica e desenha os casos dourados de forma reproduzível; nenhuma ordem real pode nascer diretamente do LLM; duplicação de ordem é impedida; conta/símbolo/modo são verificados; demo passa os critérios definidos; live continua dependente de confirmação explícita por operação.
+
 ---
 
 ## 10. Ordem de implementação recomendada
@@ -618,9 +716,11 @@ Não implementar várias grandes refatorações ao mesmo tempo. Sequência míni
 5. Fase 8: criar primeiro loop confiável de agente.
 6. Fases 6 e 7: memória e skills.
 7. Fase 5: otimizar voz sobre o novo núcleo.
-8. Fase 9: implementar a nova interface sobre eventos e contratos estáveis.
-9. Fases 10 e 11: fechar segurança, evals e observabilidade.
-10. Fases 12 e 13: operação, migração e lançamento.
+8. Preparar os contratos da Fase 14 desde as Fases 2, 7 e 8; liberar somente observer/drawing no início.
+9. Fase 9: implementar a nova interface sobre eventos e contratos estáveis, incluindo o Trading Cockpit.
+10. Fases 10 e 11: fechar segurança, evals e observabilidade.
+11. Fase 14: avançar por replay, backtest e demo; live-confirmed apenas após todos os gates.
+12. Fases 12 e 13: operação, migração e lançamento.
 
 UI pode ser projetada em paralelo após a arquitetura de informação, mas a implementação definitiva deve consumir contratos estáveis do núcleo.
 
@@ -680,6 +780,9 @@ Para UI:
 - `docs/architecture/security.md`
 - `docs/architecture/voice.md`
 - `docs/architecture/ui-system.md`
+- `docs/architecture/mt5-integration.md`
+- `docs/strategies/fimathe-pcm.md`
+- `docs/operations/mt5-trading-runbook.md`
 - `docs/api/README.md`
 - `docs/skills/authoring.md`
 - `docs/operations/runbooks.md`
@@ -709,6 +812,9 @@ Para UI:
 - [Supabase Python Client](https://supabase.com/docs/reference/python/introduction)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 - [Silero VAD](https://github.com/snakers4/silero-vad)
+- [MetaTrader 5 — integração Python](https://www.mql5.com/pt/docs/python_metatrader5)
+- [MQL5 — eventos](https://www.mql5.com/en/docs/event_handlers)
+- [MQL5 — criação de objetos no gráfico](https://www.mql5.com/en/docs/objects/objectcreate)
 
 ---
 
