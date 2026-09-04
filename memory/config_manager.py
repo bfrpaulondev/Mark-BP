@@ -3,7 +3,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from config.settings import load_config, read_legacy_config, write_legacy_config
+from config.settings import (
+    load_legacy_compatible_config,
+    read_legacy_config,
+    write_legacy_config,
+)
 
 
 # -.-.-.-
@@ -48,7 +52,7 @@ def save_api_keys(gemini_api_key: str) -> None:
 
 # -.-.-.-
 def load_api_keys() -> dict:
-    return load_config(CONFIG_FILE)
+    return load_legacy_compatible_config(CONFIG_FILE)
 
 
 # -.-.-.-
