@@ -12,7 +12,7 @@ class SafetyDecision:
     reason: str = ""
 
 
-_BLOCKED_WORDS = {
+_BLOCKED_PHRASES = {
     "disable antivirus",
     "disable defender",
     "bypass security",
@@ -21,7 +21,7 @@ _BLOCKED_WORDS = {
     "reveal password",
 }
 
-_APPROVAL_WORDS = {
+_APPROVAL_PHRASES = {
     "delete",
     "remove",
     "erase",
@@ -33,20 +33,23 @@ _APPROVAL_WORDS = {
     "send",
     "submit",
     "publish",
-    "post",
     "pay",
     "payment",
     "purchase",
     "buy",
     "transfer",
     "wire",
-    "order",
     "trade",
     "sell",
-    "permission",
-    "permissions",
+    "grant access",
+    "revoke access",
+    "change permission",
+    "change permissions",
+    "edit permission",
+    "edit permissions",
+    "save permission",
+    "save permissions",
     "administrator",
-    "admin",
     "credential",
     "password",
     "security setting",
@@ -55,6 +58,7 @@ _APPROVAL_WORDS = {
 }
 
 
+# -.-.-.-
 def evaluate_action(action: ComputerAction) -> SafetyDecision:
     material = " ".join(
         part
@@ -68,7 +72,7 @@ def evaluate_action(action: ComputerAction) -> SafetyDecision:
         if part
     ).lower()
 
-    if any(term in material for term in _BLOCKED_WORDS):
+    if any(term in material for term in _BLOCKED_PHRASES):
         return SafetyDecision(
             allowed=False,
             requires_approval=False,
@@ -82,7 +86,7 @@ def evaluate_action(action: ComputerAction) -> SafetyDecision:
             reason="The visual planner marked this step as high risk.",
         )
 
-    if any(term in material for term in _APPROVAL_WORDS):
+    if any(term in material for term in _APPROVAL_PHRASES):
         return SafetyDecision(
             allowed=False,
             requires_approval=True,
