@@ -1,0 +1,59 @@
+[project]
+name = "antonella-desktop"
+version = "0.0.0"
+description = "Dependency manifest for the Antonella desktop prototype"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "beautifulsoup4",
+    "comtypes; sys_platform == 'win32'",
+    "cryptography",
+    "ddgs>=9.0.0",
+    "fastapi",
+    "google-genai>=2.8.0",
+    "google-generativeai",
+    "mss",
+    "numpy",
+    "opencv-python",
+    "pillow",
+    "playwright",
+    "psutil",
+    "pyautogui",
+    "pycaw; sys_platform == 'win32'",
+    "pygetwindow",
+    "pyperclip",
+    "pyqt6",
+    "python-multipart",
+    "python-pptx",
+    "pywin32; sys_platform == 'win32'",
+    "pywinauto; sys_platform == 'win32'",
+    "qrcode[pil]",
+    "requests",
+    "send2trash",
+    "sounddevice",
+    "uvicorn[standard]",
+    "win10toast; sys_platform == 'win32'",
+    "youtube-transcript-api",
+]
+
+[project.optional-dependencies]
+stt-whisper = [
+    "faster-whisper",
+]
+stt-vosk = [
+    "vosk",
+]
+tts-edge = [
+    "edge-tts",
+    "miniaudio",
+]
+tts-elevenlabs = [
+    "miniaudio",
+]
+tts-kokoro = [
+    "kokoro>=0.9",
+    "soundfile",
+]
+
+[tool.uv]
+package = false
+required-version = "==0.11.33"

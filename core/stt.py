@@ -13,7 +13,13 @@ class WhisperSTT:
 
     def __init__(self, model_name: str = "base", language: str | None = None):
         import os
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "Whisper STT dependencies are not installed or are incompatible. "
+                "Run: uv sync --locked --extra stt-whisper"
+            ) from exc
         print(f"[STT] Loading Whisper '{model_name}'…")
         try:
             import torch
@@ -74,7 +80,13 @@ class VoskSTT:
     """Streaming transcription using Vosk."""
 
     def __init__(self, model_path: str | None = None, language: str = "en-us"):
-        from vosk import Model, KaldiRecognizer
+        try:
+            from vosk import Model, KaldiRecognizer
+        except ImportError as exc:
+            raise RuntimeError(
+                "Vosk STT dependencies are not installed or are incompatible. "
+                "Run: uv sync --locked --extra stt-vosk"
+            ) from exc
         print("[STT] Loading Vosk model…")
         if model_path:
             model = Model(model_path)

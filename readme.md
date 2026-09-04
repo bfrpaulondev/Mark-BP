@@ -5,6 +5,7 @@
 
 - Primary Python version: **3.11**.
 - Python 3.12 remains in the compatibility checks during stabilization.
+- Runtime dependencies are locked in `uv.lock`; `requirements.txt` is a generated, hash-verified compatibility export.
 - The current lightweight checks do not require audio, camera, GUI, or Windows dependencies.
 
 ```bash
@@ -12,7 +13,7 @@ python -m compileall -q actions core dashboard memory plugins main.py ui.py setu
 python -m unittest discover -s tests -v
 ```
 
-See [Python support](docs/current-state/python-support.md) for the exact scope of these checks.
+See [Python support](docs/current-state/python-support.md) for the exact scope of these checks and [dependency management](docs/current-state/dependencies.md) for reproducible Windows installation and voice extras.
 
 # ⚙️ MARK LI (51)
 ### The Ultimate Cross-Platform Personal AI Assistant — By FatihMakes
@@ -112,13 +113,15 @@ All three Live API upgrades degrade gracefully: if the preview API ever rejects 
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-LI.git
-cd Mark-LI
-pip install -r requirements.txt
-python main.py
+git clone https://github.com/bfrpaulondev/Mark-BP.git
+cd Mark-BP
+python -m pip install uv==0.11.33
+uv sync --locked
+uv run playwright install chromium
+uv run python main.py
 ```
 
-> ⚠️ **Installation Note:** Some OS-specific dependencies are not bundled in `requirements.txt` to keep the repo lightweight. If you hit a `ModuleNotFoundError`, install the missing package with `pip install <module_name>`.
+> **Installation note:** Windows 10/11 is the primary platform during stabilization. Offline STT/TTS engines are optional locked extras; do not install missing modules ad hoc. Follow the [dependency guide](docs/current-state/dependencies.md) and select the required voice profiles before starting the application.
 
 ---
 
