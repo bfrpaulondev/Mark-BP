@@ -38,6 +38,20 @@ class ComputerUseContractTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertTrue(decision.requires_approval)
 
+    def test_read_only_permissions_navigation_does_not_require_approval(self):
+        action = ComputerAction(
+            action="click",
+            description="Open the Permissions tab to read the current access list",
+            x=100,
+            y=100,
+            risk="low",
+        )
+
+        decision = evaluate_action(action)
+
+        self.assertTrue(decision.allowed)
+        self.assertFalse(decision.requires_approval)
+
     def test_low_risk_scroll_is_allowed(self):
         decision = evaluate_action(
             ComputerAction(
