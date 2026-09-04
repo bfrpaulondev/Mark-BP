@@ -14,12 +14,12 @@ Esta tabela descreve o estado que deve existir na `main`. Durante a revisão de 
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | Nenhuma após a integração da conclusão de `ANT-013` |
-| Pull requests abertas | Nenhuma após a integração desta entrega |
+| Tarefa ativa | `ANT-014` em validação no PR #8 |
+| Pull requests abertas | PR #8 enquanto a CI valida a entrega |
 | Issues abertas | Nenhuma |
-| Próxima tarefa recomendada | `ANT-014` — remover instalações automáticas em runtime |
-| Tarefa seguinte | `ANT-015` — logging estruturado |
-| Última CI integrada | [PR #6 — configuração tipada inicial](https://github.com/bfrpaulondev/Mark-BP/pull/6/checks) |
+| Próxima tarefa recomendada | `ANT-015` — logging estruturado |
+| Tarefa seguinte | `ANT-016` — tratamento global de erros |
+| Última CI integrada | [PR #7 — conclusão da configuração tipada](https://github.com/bfrpaulondev/Mark-BP/pull/7/checks) |
 
 ## Regras operacionais
 
@@ -41,27 +41,26 @@ Esta tabela descreve o estado que deve existir na `main`. Durante a revisão de 
 | [PR #4](https://github.com/bfrpaulondev/Mark-BP/pull/4) | `ANT-011`, `ANT-012`, `ANT-020`; parte de `ANT-014` e `ANT-019` | Lock reproduzível, extras de voz e instalação documentada | [gestão de dependências](current-state/dependencies.md), [`pyproject.toml`](../pyproject.toml) e [`uv.lock`](../uv.lock) |
 | [PR #5](https://github.com/bfrpaulondev/Mark-BP/pull/5) | Extensão de `ANT-005` | Painel operacional único e regras de higiene para branches, pull requests e issues | Este documento e [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | [PR #6](https://github.com/bfrpaulondev/Mark-BP/pull/6) | Primeiro corte de `ANT-013` | Contrato Pydantic Settings, precedência de ambiente, compatibilidade com JSON legado e lock reproduzível | [`config/settings.py`](../config/settings.py), [`tests/test_typed_settings.py`](../tests/test_typed_settings.py) e CI Python 3.11/3.12 |
+| [PR #7](https://github.com/bfrpaulondev/Mark-BP/pull/7) | `ANT-013` | Migração dos leitores runtime para configuração tipada e proteção contra persistência de segredos vindos do ambiente | [`config/settings.py`](../config/settings.py), consumidores migrados e testes de regressão |
 
-## ANT-013 — conclusão preparada
+## ANT-014 — entrega em validação
 
-A configuração tipada fica concluída nesta entrega:
+O PR #8 remove os dois fluxos de instalação automática ainda inventariados:
 
-- `AntonellaSettings` centraliza os campos conhecidos com Pydantic Settings;
-- variáveis `ANTONELLA_*` têm precedência sobre o JSON legado sem obrigar migração imediata do ficheiro existente;
-- `main.py`, UI, dashboard, `core/llm_client.py` e os leitores de configuração nas actions deixam de carregar diretamente `api_keys.json`;
-- leitores da chave Gemini usam o contrato central e devolvem erro explícito quando a chave não existe;
-- metadados mutáveis como `camera_index` continuam compatíveis com o JSON legado;
-- caminhos de escrita que atualizam configuração persistida partem do JSON cru, impedindo que segredos fornecidos apenas por variáveis de ambiente sejam copiados para disco;
-- o comportamento legado esparso de `memory/config_manager.py` é preservado;
-- existe teste específico que prova que `ANTONELLA_GEMINI_API_KEY` pode sobrepor a chave em runtime sem ser persistida numa escrita de outra preferência;
-- lock, export reproduzível, compilação e suíte unitária foram verificados antes da criação do PR final.
+- `core/installer.py` deixa de executar `pip install` e de descarregar Chromium em runtime;
+- o contrato legado `install_for_config()` é preservado, mas passa a apenas verificar prontidão e indicar `uv sync --locked` com os extras necessários;
+- `actions/dev_agent.py` deixa de instalar dependências do projeto gerado;
+- dependências propostas pelo Dev Agent são gravadas num `requirements.txt` do próprio projeto;
+- erros `ModuleNotFoundError` deixam de provocar mutação automática do ambiente e devolvem uma instrução explícita de instalação;
+- testes garantem que o fluxo de preparação do Dev Agent não chama `subprocess.run` para instalar pacotes;
+- nenhum segredo, configuração de UI ou arquitetura do agente foi alterado.
 
-Depois do merge, `ANT-013` está concluída e a próxima tarefa operacional é `ANT-014`.
+Depois de a CI do PR #8 ficar verde e o merge ser concluído, `ANT-014` fica concluída e a próxima tarefa operacional passa a ser `ANT-015`.
 
 ## Próxima sequência
 
-1. `ANT-014`: remover instalações automáticas de pacotes em runtime, começando pelos fluxos já inventariados em `core/installer.py` e `actions/dev_agent.py`;
-2. `ANT-015` e `ANT-016`: logging estruturado e tratamento global de erros sem reestruturar módulos não relacionados;
+1. `ANT-015`: introduzir logging estruturado com IDs de correlação, níveis consistentes e redação de segredos/PII sem refatorar módulos não relacionados;
+2. `ANT-016`: criar tratamento global de erros separando configuração, fornecedor, permissão, erros recuperáveis e falhas internas;
 3. `ANT-017` e restante `ANT-019`: lint, formatter, tipos, auditoria de dependências e verificação de segredos de forma incremental.
 
 Cada etapa deve preservar o comportamento legado, ter rollback simples e entrar por uma única branch/pull request ativa de cada vez.
@@ -72,7 +71,7 @@ Cada etapa deve preservar o comportamento legado, ter rollback simples e entrar 
 |---|---|---|
 | `ANT-002` — licença herdada | Uso comercial ainda não validado | Auditar licença e autorização antes de comercializar |
 | `ANT-004` — chave privada no histórico | Deve ser tratada como comprometida | Revogar material relacionado e decidir sobre reescrita segura do histórico |
-| `ANT-014` — instalações em runtime | Remoção parcial; ainda existem fluxos herdados | Caracterizar e substituir por instalação explícita |
+| `ANT-014` — instalações em runtime | Implementação preparada no PR #8; falta apenas CI/merge | Integrar somente se todas as verificações ficarem verdes |
 | `ANT-019` — CI completa | Compilação, testes e lock passam; faltam lint, tipos, auditoria e secret scan | Completar depois de definir as ferramentas em `ANT-017` |
 | Smoke test Windows/áudio | Ainda sem evidência ponta a ponta | Executar em ambiente Windows com hardware e extras selecionados |
 
