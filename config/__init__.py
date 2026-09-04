@@ -5,6 +5,7 @@ from pathlib import Path
 from config.settings import (
     CONFIG_FILE,
     get_gemini_key as _get_gemini_key,
+    get_openai_key as _get_openai_key,
     load_config,
 )
 
@@ -20,6 +21,11 @@ def get_config() -> dict:
 # -.-.-.-
 def get_gemini_key() -> str | None:
     return _get_gemini_key(_CONFIG_PATH)
+
+
+# -.-.-.-
+def get_openai_key() -> str | None:
+    return _get_openai_key(_CONFIG_PATH)
 
 
 # -.-.-.-

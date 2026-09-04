@@ -1,105 +1,71 @@
 # Antonella — Estado da execução
 
-> Painel operacional do trabalho já realizado e do próximo passo. O [plano mestre](ANTONELLA_MASTER_ROADMAP.md) continua a ser a fonte do escopo completo e dos critérios `ANT-*`.
+> Painel operacional. O plano mestre continua a ser a fonte do escopo completo.
 
 **Última atualização:** 2026-09-04  
-**Branch canónica:** `main`  
-**Responsável pelo produto:** Bruno Paulon
+**Branch canónica:** `main`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | Nenhuma — redesign desktop e voz feminina integrados |
-| Pull requests abertas | Nenhuma |
+| Tarefa ativa | Realtime Computer Use + routing de custo |
+| Pull requests abertas | Uma no máximo durante implementação |
 | Issues abertas | Nenhuma |
-| Próximo teste | Windows real: `uv run python scripts/doctor.py` → `uv run python antonella.py` |
-| Próxima tarefa após smoke | Continuar `ANT-015` e iniciar `ANT-016` |
-
-## Regras operacionais
-
-- Manter no máximo uma branch e uma pull request de implementação ativa para este fluxo.
-- Fazer merge assim que a CI estiver verde.
-- Não criar issues para duplicar o plano mestre.
-- Não marcar baseline funcional como concluído sem evidência real Windows/áudio.
-- Após squash merge, alinhar a branch transitória à `main` se a API não permitir apagá-la.
+| Próximo teste | Windows multi-monitor + ScreenConnect |
+| Próxima tarefa | Extrair mais routing/orquestração do `main.py` |
 
 ## Entregas integradas
 
-| Entrega | Tarefas | Resultado |
-|---|---|---|
-| PR #1 | Planeamento | Plano mestre de transformação criado |
-| PR #2 | `ANT-000`, `ANT-001`, `ANT-005` | Identidade, inventário técnico e política de contribuição |
-| PR #3 | `ANT-010`, `ANT-018`; parte de `ANT-019` | Python 3.11/3.12, testes mínimos e CI inicial |
-| PR #4 | `ANT-011`, `ANT-012`, `ANT-020`; parte de `ANT-019` | Lock reproduzível, extras de voz e instalação documentada |
-| PR #5 | Extensão de `ANT-005` | Painel operacional e higiene de branches/PRs/issues |
-| PR #6 e #7 | `ANT-013` | Configuração tipada, variáveis `ANTONELLA_*`, compatibilidade JSON e proteção de segredos |
-| PR #8 | `ANT-014` | Instalações automáticas em runtime removidas |
-| PR #9 | Primeiro corte de `ANT-015` | Logging JSON, correlation id e redação de dados sensíveis |
-| PR #10 | Test readiness | `doctor`, documentação e smoke test reproduzível |
-| PR #11 | Correção doctor | Execução direta de `scripts/doctor.py` corrigida e coberta por regressão |
-| PR #12 | UI/UX + voz | Referência visual Antonella, orb neural optimizado, voz feminina configurável e novo entrypoint |
+- PR #1–#11: roadmap, estabilização, config, dependências, testes, logging e doctor.
+- PR #12: nova UI Antonella + voz feminina.
+- PR #13: visão multi-monitor e identidade da sessão de visão.
 
-## Entrega atual — identidade visual Antonella + voz feminina
+## Entrega em curso — Realtime Computer Use económico
 
-A entrega substitui o aspecto herdado do Mark/JARVIS no teste desktop sem reescrever ainda o motor realtime estabilizado.
+### Perceção contínua local
 
-### UI/UX
+- stream desktop em background;
+- 10/15/20 FPS conforme modo de custo;
+- seleção automática do monitor ativo;
+- coordenadas negativas;
+- `frame diff` local;
+- apenas alterações relevantes ficam disponíveis ao planner;
+- compressão diferente por tier.
 
-- novo package `ui/` assume o import canónico, mantendo `ui.py` legado apenas como rollback;
-- layout dark premium inspirado na referência aprovada;
-- cabeçalho `ANTONELLA` + `Adaptive neural companion`;
-- relógio e data em pt-PT;
-- CPU, MEM, NET e CORE STATUS em cartões à esquerda;
-- esfera neural central renderizada com partículas pré-calculadas e animação optimizada a ~30 FPS;
-- estados visuais `A ESCUTAR`, `A PENSAR`, `A EXECUTAR`, `A RESPONDER` e mute;
-- `REGISTO` à direita com sanitização do branding herdado;
-- drag-and-drop/click para anexar ficheiro;
-- barra inferior `Diz alguma coisa…`, interrupção e mute;
-- câmara e conteúdo contextual preservados por compatibilidade.
+### Loop
 
-### Voz/identidade
+```text
+observe → plan → safety → act → observe → verify/change → continue
+```
 
-- novo entrypoint canónico `antonella.py`;
-- `assistant_name` passa a `Antonella` por defeito;
-- voz Gemini Live passa a ser configurável por `ANTONELLA_VOICE_NAME`;
-- `Kore` é o default atual;
-- estilo vocal feminino, quente, natural, calmo e conversacional por defeito;
-- prompt deixa de instruir a persona JARVIS e passa a usar `ANTONELLA CORE PROTOCOL`.
+O loop corre em background para a conversa de voz continuar disponível.
 
-### Regressões adicionadas
+### Controlo de custo
 
-- resolução do import `ui` para o novo package;
-- contrato visual da referência (`ParticleOrb`, métricas, `REGISTO`, drop-zone e input);
-- default de voz feminina/configurável;
-- ausência da instrução herdada `Act: Always act like Jarvis`.
+- `economy` default;
+- limites de chamadas/passos;
+- resolução menor em economy;
+- OpenAI Luna/Terra/Sol por tier quando configurado;
+- fallback Gemini.
+
+### Segurança
+
+- baixo risco automático;
+- efeitos destrutivos, externos, privilegiados, financeiros ou permissões pausam;
+- aprovação de uso único;
+- `stop` interrompe inclusive espera de aprovação.
+
+### Integração
+
+Entra como plugin `realtime_computer_use`, evitando aumentar o monólito `main.py`. Esta primeira slice não marca as tarefas amplas de autonomia/segurança como concluídas.
 
 ## Próxima sequência
 
-1. executar smoke real em Windows com microfone e confirmar aparência/voz;
-2. corrigir apenas regressões descobertas no smoke;
-3. continuar `ANT-015` — logging estruturado em pontos críticos do runtime;
-4. `ANT-016` — contratos globais de erro;
-5. `ANT-017`/`ANT-019` — lint, tipos, auditoria e secret scan;
-6. avançar para memória cloud e router multimodelo depois do desktop estabilizado.
-
-## Riscos e bloqueios conhecidos
-
-| Item | Situação | Próxima decisão |
-|---|---|---|
-| `ANT-002` — licença herdada | Uso comercial ainda não validado | Auditar antes de comercialização |
-| `ANT-004` — chave privada no histórico | Deve ser tratada como comprometida | Revogar material relacionado e decidir reescrita segura |
-| `ANT-009` — baseline funcional | Doctor pronto; falta evidência Windows/áudio da UI nova | Executar smoke real |
-| `ANT-015` — logging estruturado | Fundação integrada; runtime legado ainda parcial | Migrar incrementalmente |
-| `ANT-019` — CI completa | Compilação/testes/lock presentes; faltam gates adicionais | Completar depois do smoke |
-| Motor realtime legado | Ainda contém nomes internos JARVIS em console/código | Migrar por camadas sem quebrar compatibilidade |
-
-## Protocolo de atualização
-
-Em cada pull request relevante:
-
-1. atualizar este estado;
-2. registar evidência da entrega;
-3. manter apenas riscos reais;
-4. definir uma única tarefa seguinte;
-5. depois do merge, confirmar CI verde e remover estado transitório.
+1. validar ScreenConnect em Windows real;
+2. adicionar UI Automation/estrutura Windows antes de visão quando disponível;
+3. extrair Tool Router/Agent Orchestrator;
+4. expandir router multimodelo para além de Computer Use;
+5. Policy Engine completo;
+6. memória Supabase/skills;
+7. MT5 observer/drawing após core estável.
