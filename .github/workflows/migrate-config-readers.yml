@@ -36,6 +36,7 @@ jobs:
                   raise SystemExit(f"{path}: expected one match, found {count}")
               file.write_bytes(text.replace(old_value, new_value, 1).encode("utf-8"))
 
+          # Main session
           replace_once(
               "main.py",
               "from google.genai import types\n",
@@ -47,22 +48,34 @@ jobs:
               'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
           )
 
+          # Desktop UI
           replace_once(
               "ui.py",
               "import psutil\n",
-              "import psutil\n\nfrom config import get_config\n",
+              "import psutil\n\nfrom config import get_config\nfrom config.settings import read_legacy_config, write_legacy_config\n",
           )
           replace_once(
               "ui.py",
               'def _read_full_config() -> dict:\n    """Read api_keys.json config dict. Returns {} on any error."""\n    try:\n        return json.loads(API_FILE.read_text(encoding="utf-8"))\n    except Exception:\n        return {}\n',
-              'def _read_full_config() -> dict:\n    """Read the central typed configuration through the legacy-compatible dict."""\n    return get_config()\n',
+              'def _read_full_config() -> dict:\n    """Read the central typed configuration through the compatibility dict."""\n    return get_config()\n',
           )
           replace_once(
               "ui.py",
               '    def _check_config(self) -> bool:\n        if not API_FILE.exists(): return False\n        try:\n            d = json.loads(API_FILE.read_text(encoding="utf-8"))\n            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))\n        except Exception:\n            return False\n',
               '    def _check_config(self) -> bool:\n        d = get_config()\n        return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))\n',
           )
+          replace_once(
+              "ui.py",
+              '            # Reuse camera index detected by screen_processor (cached in api_keys.json)\n            cam_idx = 0\n            try:\n                import json as _j\n                cfg = _j.loads((CONFIG_DIR / "api_keys.json").read_text())\n                cam_idx = int(cfg.get("camera_index", 0))\n            except Exception:\n                pass\n',
+              '            # Reuse the camera index detected by screen_processor.\n            cam_idx = 0\n            try:\n                cam_idx = int(get_config().get("camera_index", 0))\n            except Exception:\n                pass\n',
+          )
+          replace_once(
+              "ui.py",
+              '        try:\n            data = _read_full_config()\n            data["assistant_name"] = self._assistant_name\n            data["user_name"] = user_name.strip()\n            if ui_color:\n                data["ui_color"] = ui_color.strip().lower()\n            API_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")\n',
+              '        try:\n            data = read_legacy_config(API_FILE)\n            data["assistant_name"] = self._assistant_name\n            data["user_name"] = user_name.strip()\n            if ui_color:\n                data["ui_color"] = ui_color.strip().lower()\n            write_legacy_config(data, API_FILE)\n',
+          )
 
+          # Gemini key readers that share the same compatibility contract.
           simple_key_files = [
               "actions/code_helper.py",
               "actions/dev_agent.py",
@@ -70,43 +83,66 @@ jobs:
               "actions/desktop.py",
               "actions/web_search.py",
               "actions/youtube_video.py",
+              "actions/upload_video.py",
+              "actions/computer_settings.py",
           ]
           for path in simple_key_files:
-              marker = "from pathlib import Path\n"
-              replacement = "from pathlib import Path\n\nfrom config import get_gemini_key\n"
-              replace_once(path, marker, replacement)
+              replace_once(
+                  path,
+                  "from pathlib import Path\n",
+                  "from pathlib import Path\n\nfrom config import get_gemini_key\n",
+              )
 
-          replace_once(
+          standard_key_reader = (
+              'def _get_api_key() -> str:\n'
+              '    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n'
+              '        return json.load(f)["gemini_api_key"]\n'
+          )
+          central_key_reader = (
+              'def _get_api_key() -> str:\n'
+              '    key = get_gemini_key()\n'
+              '    if not key:\n'
+              '        raise RuntimeError("gemini_api_key not found in configuration.")\n'
+              '    return key\n'
+          )
+          for path in [
               "actions/code_helper.py",
-              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
-              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
-          )
-          replace_once(
               "actions/dev_agent.py",
-              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
-              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
-          )
+              "actions/web_search.py",
+              "actions/youtube_video.py",
+              "actions/upload_video.py",
+          ]:
+              replace_once(path, standard_key_reader, central_key_reader)
+
           replace_once(
               "actions/file_processor.py",
               'def _get_api_key() -> str:\n    config_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"\n    with open(config_path, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
-              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+              central_key_reader,
           )
           replace_once(
               "actions/desktop.py",
               'def _get_api_key() -> str:\n    path = _get_base_dir() / "config" / "api_keys.json"\n    with open(path, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
-              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+              central_key_reader,
           )
           replace_once(
-              "actions/web_search.py",
-              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
-              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
-          )
-          replace_once(
-              "actions/youtube_video.py",
-              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
-              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+              "actions/computer_settings.py",
+              'def _get_api_key() -> str:\n    path = _get_base_dir() / "config" / "api_keys.json"\n    with open(path, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              central_key_reader,
           )
 
+          # Flight finder already imports the config module.
+          replace_once(
+              "actions/flight_finder.py",
+              "from config import is_windows, is_mac, is_linux\n",
+              "from config import get_gemini_key, is_windows, is_mac, is_linux\n",
+          )
+          replace_once(
+              "actions/flight_finder.py",
+              standard_key_reader,
+              central_key_reader,
+          )
+
+          # General OS/config readers.
           replace_once(
               "actions/computer_control.py",
               "import random\nfrom pathlib import Path\n",
@@ -119,6 +155,29 @@ jobs:
           )
 
           replace_once(
+              "actions/pushup_counter.py",
+              "import numpy as np\n",
+              "import numpy as np\n\nfrom config import get_config\n",
+          )
+          replace_once(
+              "actions/pushup_counter.py",
+              'def _config() -> dict:\n    try:\n        return json.loads(\n            (BASE_DIR / "config" / "api_keys.json").read_text(encoding="utf-8")\n        )\n    except Exception:\n        return {}\n',
+              'def _config() -> dict:\n    return get_config()\n',
+          )
+
+          replace_once(
+              "actions/send_message.py",
+              "from pathlib import Path\n",
+              "from pathlib import Path\n\nfrom config.settings import load_legacy_compatible_config\n",
+          )
+          replace_once(
+              "actions/send_message.py",
+              'def _get_os() -> str:\n    try:\n        cfg = json.loads(\n            (_base_dir() / "config" / "api_keys.json").read_text(encoding="utf-8")\n        )\n        return cfg.get("os_system", "windows").lower()\n    except Exception:\n        return "windows"\n',
+              'def _get_os() -> str:\n    cfg = load_legacy_compatible_config(_base_dir() / "config" / "api_keys.json")\n    return str(cfg.get("os_system", "windows")).lower()\n',
+          )
+
+          # Local/OpenAI-compatible LLM configuration.
+          replace_once(
               "core/llm_client.py",
               "import requests\n",
               "import requests\n\nfrom config import get_config\n",
@@ -129,6 +188,7 @@ jobs:
               'def _load_config() -> dict:\n    return get_config()\n',
           )
 
+          # Dashboard key reader.
           replace_once(
               "dashboard/server.py",
               "from pathlib import Path\n",
@@ -140,6 +200,8 @@ jobs:
               'def _get_gemini_key() -> str | None:\n    return get_gemini_key()\n',
           )
 
+          # Vision persists camera metadata, so writes must use raw persisted JSON
+          # instead of a config dict that may contain environment-only secrets.
           replace_once(
               "actions/screen_processor.py",
               "from google.genai import types as gtypes\n",
@@ -156,8 +218,31 @@ jobs:
               'def _save_config_key(key: str, value) -> None:\n    try:\n        cfg = read_legacy_config(_CONFIG_PATH)\n        cfg[key] = value\n        write_legacy_config(cfg, _CONFIG_PATH)\n    except Exception as e:\n        print(f"[Vision] ⚠️  Could not save config key \'{key}\': {e}")\n',
           )
 
-      - name: Show remaining legacy config references
-        run: grep -R "api_keys.json" -n --include='*.py' . || true
+      - name: Audit remaining legacy config reads
+        shell: python
+        run: |
+          from pathlib import Path
+
+          allowed = {
+              Path("config/settings.py"),
+              Path("memory/config_manager.py"),
+              Path("tests/test_config_manager.py"),
+              Path("tests/test_typed_settings.py"),
+          }
+          offenders = []
+          for path in Path(".").rglob("*.py"):
+              if path in allowed or ".git" in path.parts:
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              if "api_keys.json" not in text:
+                  continue
+              lines = text.splitlines()
+              for index, line in enumerate(lines, 1):
+                  low = line.lower()
+                  if "api_keys.json" in low and any(token in low for token in ("read_text", "open(")):
+                      offenders.append(f"{path}:{index}: {line.strip()}")
+          if offenders:
+              raise SystemExit("Direct config reads remain:\n" + "\n".join(offenders))
 
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -167,8 +252,8 @@ jobs:
       - name: Verify dependency lock
         run: |
           uv lock --check
-          uv export --locked --no-dev --no-emit-project --output-file /tmp/requirements.txt
-          diff -u requirements.txt /tmp/requirements.txt
+          uv export --locked --no-dev --no-emit-project --output-file requirements.txt
+          git diff --exit-code -- requirements.txt
 
       - name: Set up Python
         uses: actions/setup-python@v5
