@@ -395,8 +395,8 @@ A interface atual será substituída, não apenas retocada.
 ## Fase 1 — Estabilização do fork
 
 - [x] **ANT-010 — Fixar Python suportado.** Selecionar versão oficial e criar ficheiros de configuração consistentes. Evidência: [suporte de Python](current-state/python-support.md) e [`.python-version`](../.python-version).
-- [ ] **ANT-011 — Substituir `requirements.txt` aberto por dependências fixadas.** Gerar lockfile com hashes e dependências específicas por sistema operativo.
-- [ ] **ANT-012 — Corrigir dependências de STT/TTS ausentes.** Garantir que toda importação opcional possui extra documentado e erro acionável.
+- [x] **ANT-011 — Substituir `requirements.txt` aberto por dependências fixadas.** Gerar lockfile com hashes e dependências específicas por sistema operativo. Evidência: [`pyproject.toml`](../pyproject.toml), [`uv.lock`](../uv.lock), [`requirements.txt`](../requirements.txt) e [gestão de dependências](current-state/dependencies.md).
+- [x] **ANT-012 — Corrigir dependências de STT/TTS ausentes.** Garantir que toda importação opcional possui extra documentado e erro acionável. Evidência: [perfis opcionais](current-state/dependencies.md), [`core/stt.py`](../core/stt.py), [`core/tts.py`](../core/tts.py) e [testes](../tests/test_optional_voice_dependencies.py).
 - [ ] **ANT-013 — Criar configuração tipada.** Substituir leituras dispersas de JSON por Pydantic Settings e variáveis de ambiente.
 - [ ] **ANT-014 — Remover instalação automática de pacotes em runtime.** Instalações devem ocorrer apenas por processo explícito e auditado.
 - [ ] **ANT-015 — Criar logging estruturado.** IDs de correlação, níveis consistentes e redação de segredos/PII.
@@ -404,7 +404,7 @@ A interface atual será substituída, não apenas retocada.
 - [ ] **ANT-017 — Adicionar lint, formatter e type checking.** Configurar Ruff, formatter e verificação estática adequada.
 - [x] **ANT-018 — Criar suíte mínima de testes.** Cobrir configuração, memória atual, plugin loader e dispatch de ferramentas. Evidência: [`tests/`](../tests/).
 - [ ] **ANT-019 — Criar CI inicial.** Lint, tipos, testes, auditoria de dependências e verificação de segredos.
-- [ ] **ANT-020 — Documentar instalação reproduzível.** Windows como plataforma primária; macOS/Linux apenas quando testados.
+- [x] **ANT-020 — Documentar instalação reproduzível.** Windows como plataforma primária; macOS/Linux apenas quando testados. Evidência: [dependências e instalação reproduzível](current-state/dependencies.md).
 
 **Gate da fase:** instalação limpa reproduzível; CI verde; nenhuma dependência instalada silenciosamente em execução.
 

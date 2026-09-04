@@ -87,7 +87,14 @@ def _play_np(samples, sample_rate: int) -> None:
 
 def _play_audio_bytes(audio_bytes: bytes) -> None:
     """Decode MP3/WAV/OGG bytes and play via sounddevice (uses miniaudio)."""
-    import miniaudio
+    try:
+        import miniaudio
+    except ImportError as exc:
+        raise RuntimeError(
+            "Compressed-audio playback dependencies are not installed. "
+            "Run: uv sync --locked --extra tts-edge "
+            "(or --extra tts-elevenlabs)"
+        ) from exc
     decoded = miniaudio.decode(
         audio_bytes,
         output_format=miniaudio.SampleFormat.FLOAT32,
@@ -118,7 +125,13 @@ class EdgeTTSEngine:
             _play_audio_bytes(audio_bytes)
 
     async def _synth(self, text: str) -> bytes:
-        import edge_tts
+        try:
+            import edge_tts
+        except ImportError as exc:
+            raise RuntimeError(
+                "EdgeTTS dependencies are not installed or are incompatible. "
+                "Run: uv sync --locked --extra tts-edge"
+            ) from exc
         comm = edge_tts.Communicate(text, self.voice)
         buf  = bytearray()
         async for chunk in comm.stream():
@@ -128,7 +141,7 @@ class EdgeTTSEngine:
 
 
 # ---------------------------------------------------------------------------
-# Kokoro import helper — auto-upgrades on version-mismatch errors
+# Kokoro import helper
 # ---------------------------------------------------------------------------
 
 # Errors that indicate the installed kokoro uses old transformers classes
@@ -137,19 +150,12 @@ _KOKORO_COMPAT_ERRORS = ("AlbertModel", "AutoModel", "cannot import name")
 
 
 def _import_kokoro_pipeline():
-    """Import KPipeline, auto-upgrading kokoro if a version mismatch is found.
+    """Import KPipeline without mutating the active Python environment.
 
     Old kokoro (<0.9) imports AlbertModel / AutoModel from transformers.
     Newer transformers versions no longer export these at the top level,
     causing an ImportError.  kokoro>=0.9 removed these dependencies.
-
-    When the error is detected we:
-      1. Upgrade kokoro to >=0.9 via pip (silent, background)
-      2. Flush stale kokoro entries from sys.modules
-      3. Re-import — this time it should succeed
     """
-    import sys
-
     def _try_import():
         from kokoro import KPipeline  # noqa: PLC0415
         return KPipeline
@@ -158,41 +164,14 @@ def _import_kokoro_pipeline():
         return _try_import()
     except Exception as first_err:
         err_msg = str(first_err)
-        if not any(marker in err_msg for marker in _KOKORO_COMPAT_ERRORS):
-            # Unrelated error (kokoro not installed, etc.)
-            raise RuntimeError(
-                f"Kokoro import failed: {first_err}\n"
-                "Run: pip install kokoro>=0.9 soundfile"
-            ) from first_err
-
-        # ── Version mismatch: upgrade kokoro silently and retry ──────────
-        print("[TTS] Kokoro/transformers version mismatch detected — upgrading kokoro…")
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "kokoro>=0.9",
-             "--upgrade", "--quiet", "--disable-pip-version-check"],
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace").strip()
-            raise RuntimeError(
-                f"Kokoro auto-upgrade failed: {stderr[:200]}\n"
-                "Run manually: pip install kokoro>=0.9 soundfile"
-            ) from first_err
-
-        # Flush any stale kokoro submodules from the import cache
-        stale = [k for k in sys.modules if k == "kokoro" or k.startswith("kokoro.")]
-        for key in stale:
-            del sys.modules[key]
-
-        print("[TTS] Kokoro upgraded — retrying import…")
-        try:
-            return _try_import()
-        except Exception as retry_err:
-            raise RuntimeError(
-                f"Kokoro still broken after upgrade: {retry_err}\n"
-                "Run manually: pip install --upgrade kokoro transformers"
-            ) from retry_err
+        if any(marker in err_msg for marker in _KOKORO_COMPAT_ERRORS):
+            problem = "The installed Kokoro/Transformers versions are incompatible."
+        else:
+            problem = "Kokoro dependencies are not installed or failed to import."
+        raise RuntimeError(
+            f"{problem} Run: uv sync --locked --extra tts-kokoro. "
+            f"Details: {first_err}"
+        ) from first_err
 
 
 # Kokoro voice prefix → KPipeline lang_code mapping

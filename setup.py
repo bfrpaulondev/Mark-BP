@@ -4,10 +4,24 @@ import platform
 from pathlib import Path
 
 print("Installing requirements...")
-subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+subprocess.run(
+    [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--require-hashes",
+        "-r",
+        "requirements.txt",
+    ],
+    check=True,
+)
 
-print("Installing Playwright browsers...")
-subprocess.run([sys.executable, "-m", "playwright", "install"], check=True)
+print("Installing Playwright Chromium...")
+subprocess.run(
+    [sys.executable, "-m", "playwright", "install", "chromium"],
+    check=True,
+)
 
 if platform.system() == "Windows":
     try:
@@ -22,5 +36,5 @@ if platform.system() == "Windows":
             f'    "{sys.executable}" "{postinstall}" -install\n'
         )
 
-print("\n✅ Setup complete! Run 'python main.py' to start MARK LI.")
+print("\n✅ Setup complete! Run 'python main.py' to start the Antonella prototype.")
 
