@@ -21,6 +21,7 @@ MAX_FIX_ATTEMPTS = 5
 MODEL_PLANNER    = "gemini-flash-latest"
 MODEL_WRITER     = "gemini-flash-latest"
 
+
 def _get_api_key() -> str:
     key = get_gemini_key()
     if not key:
@@ -74,7 +75,7 @@ def _classify_error(output: str) -> str:
 
     if "syntaxerror" in low or "invalid syntax" in low:
         return "syntax_error"
-    
+
     if "cannot import" in low or "importerror" in low:
         return "import_error"
 
@@ -89,7 +90,7 @@ def _classify_error(output: str) -> str:
 
 
 def _has_error(output: str, run_command: str) -> bool:
-    
+
     low = output.lower()
 
     if "timed out" in low:
@@ -100,6 +101,7 @@ def _has_error(output: str, run_command: str) -> bool:
 
     error_type = _classify_error(output)
     return error_type != "none"
+
 
 class RateLimitError(Exception):
     pass
@@ -153,6 +155,7 @@ JSON:"""
         if _is_rate_limit(e):
             raise RateLimitError(str(e))
         raise
+
 
 def _write_file(
     file_info: dict,
@@ -238,40 +241,22 @@ Code for {file_path}:"""
             raise RateLimitError(str(e))
         raise
 
+
 def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
+    """Declare generated-project dependencies without installing them at runtime."""
     if not dependencies:
         return "No external dependencies."
 
-    to_install = []
-    for dep in dependencies:
-        pkg_name = re.split(r"[>=<!]", dep)[0].strip()
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", pkg_name],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            to_install.append(dep)
-        else:
-            print(f"[DevAgent] ✓ Already installed: {pkg_name}")
+    requirements_path = project_dir / "requirements.txt"
+    requirements_path.write_text(
+        "\n".join(dependencies) + "\n",
+        encoding="utf-8",
+    )
+    return (
+        f"Dependencies declared in {requirements_path.name}. "
+        f"Install explicitly with: {sys.executable} -m pip install -r requirements.txt"
+    )
 
-    if not to_install:
-        return f"All dependencies already installed: {', '.join(dependencies)}"
-
-    print(f"[DevAgent] 📦 Installing: {to_install}")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install"] + to_install,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=120, cwd=str(project_dir)
-        )
-        if result.returncode == 0:
-            return f"Installed: {', '.join(to_install)}"
-        return f"Install warning (non-fatal): {result.stderr[:200]}"
-    except subprocess.TimeoutExpired:
-        return "Dependency install timed out (non-fatal)."
-    except Exception as e:
-        return f"Install error (non-fatal): {e}"
 
 def _open_vscode(project_dir: Path) -> bool:
     vscode_candidates = [
@@ -293,6 +278,7 @@ def _open_vscode(project_dir: Path) -> bool:
         except Exception:
             continue
     return False
+
 
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     print(f"[DevAgent] 🚀 Running: {run_command}")
@@ -327,27 +313,24 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     except Exception as e:
         return f"Run error: {e}"
 
-def _try_auto_install(error_output: str, project_dir: Path) -> bool:
-    """ModuleNotFoundError varsa eksik paketi otomatik kurmaya çalışır."""
-    pattern = re.compile(
-        r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]", re.IGNORECASE
-    )
-    match = pattern.search(error_output)
-    if not match:
-        return False
 
-    pkg = match.group(1).replace("_", "-").split(".")[0]
-    print(f"[DevAgent] 🔧 Auto-installing missing package: {pkg}")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", pkg],
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=60, cwd=str(project_dir)
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+def _dependency_error_message(project_dir: Path, error_output: str) -> str:
+    match = re.search(
+        r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]",
+        error_output,
+        re.IGNORECASE,
+    )
+    module = match.group(1) if match else "a required package"
+    requirements_path = project_dir / "requirements.txt"
+    if requirements_path.exists():
+        command = f"{sys.executable} -m pip install -r requirements.txt"
+    else:
+        command = "install the project dependencies explicitly"
+    return (
+        f"Project requires {module}. Runtime dependency installation is disabled. "
+        f"Run explicitly from {project_dir}: {command}"
+    )
+
 
 def _fix_files(
     error_output: str,
@@ -438,6 +421,7 @@ Fixed code for {fix_path}:"""
 
     return updated_codes
 
+
 def _build_project(
     description: str,
     language: str,
@@ -457,11 +441,13 @@ def _build_project(
         plan = _plan_project(description, language)
     except RateLimitError:
         msg = "Rate limit reached, sir. Please try again in a moment."
-        if speak: speak(msg)
+        if speak:
+            speak(msg)
         return msg
     except ValueError as e:
         msg = f"Planning failed: {e}"
-        if speak: speak(msg)
+        if speak:
+            speak(msg)
         return msg
 
     proj_name    = project_name or plan.get("project_name", "jarvis_project")
@@ -514,7 +500,8 @@ def _build_project(
 
     if not file_codes:
         msg = "I could not write any project files, sir."
-        if speak: speak(msg)
+        if speak:
+            speak(msg)
         return msg
 
     if dependencies:
@@ -523,8 +510,7 @@ def _build_project(
 
     _open_vscode(project_dir)
 
-    last_output   = ""
-    auto_installs = 0  
+    last_output = ""
 
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
         log(f"Running project (attempt {attempt}/{MAX_FIX_ATTEMPTS})...")
@@ -537,20 +523,20 @@ def _build_project(
                 f"Built in {attempt} attempt{'s' if attempt > 1 else ''}. "
                 f"Saved to: {project_dir}"
             )
-            if speak: speak(msg)
+            if speak:
+                speak(msg)
             return f"{msg}\n\nOutput:\n{last_output}"
 
         if attempt == MAX_FIX_ATTEMPTS:
             break
 
         error_type = _classify_error(last_output)
-        if error_type == "dependency_error" and auto_installs < 3:
-            installed = _try_auto_install(last_output, project_dir)
-            if installed:
-                auto_installs += 1
-                log("Missing dependency installed, retrying...")
-                time.sleep(1)
-                continue
+        if error_type == "dependency_error":
+            msg = _dependency_error_message(project_dir, last_output)
+            log(msg)
+            if speak:
+                speak(msg)
+            return f"{msg}\n\nOutput:\n{last_output}"
 
         log(f"Fixing errors (type: {error_type})...")
         try:
@@ -567,7 +553,8 @@ def _build_project(
             time.sleep(1)
         except RateLimitError:
             msg = "Rate limit reached during fix. Project saved, check it manually in VSCode."
-            if speak: speak(msg)
+            if speak:
+                speak(msg)
             return msg
         except Exception as e:
             log(f"Fix step failed: {e}")
@@ -576,7 +563,8 @@ def _build_project(
         f"I couldn't fully fix '{proj_name}' after {MAX_FIX_ATTEMPTS} attempts, sir. "
         f"Project is saved at {project_dir} — open it in VSCode and check manually."
     )
-    if speak: speak(msg)
+    if speak:
+        speak(msg)
     return f"{msg}\n\nLast error:\n{last_output[:600]}"
 
 
@@ -597,10 +585,10 @@ def dev_agent(
         return "Please describe the project you want me to build, sir."
 
     return _build_project(
-        description  = description,
-        language     = language,
-        project_name = project_name,
-        timeout      = timeout,
-        speak        = speak,
-        player       = player,
+        description=description,
+        language=language,
+        project_name=project_name,
+        timeout=timeout,
+        speak=speak,
+        player=player,
     )
