@@ -168,8 +168,13 @@ class RuntimeDashboard(QWidget):
         else:
             agent_accent = _FAINT
 
+        agent_value = str(snapshot.get("agent") or "Em espera")
+        step = int(snapshot.get("agent_step") or 0)
+        if step and agent_state in {"observing", "planning", "executing", "awaiting_approval"}:
+            agent_value = f"{agent_value} · {step}"
+
         self._agent.set_value(
-            str(snapshot.get("agent") or "Em espera"),
+            agent_value,
             accent=agent_accent,
             tooltip=str(snapshot.get("agent_detail") or "Computer Use disponível"),
         )
@@ -197,5 +202,12 @@ def attach_runtime_dashboard(ui) -> RuntimeDashboard | None:
     command = getattr(window, "_input", None)
     if command is not None:
         command.setToolTip("Escreve um comando · Enter envia · Ctrl+K foca esta caixa")
+
+    try:
+        from ui.settings_dialog import bind_settings_button
+
+        bind_settings_button(ui)
+    except Exception:
+        pass
 
     return dashboard
