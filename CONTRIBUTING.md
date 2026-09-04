@@ -11,6 +11,15 @@ Este repositório contém um protótipo herdado em transformação gradual. O ob
 - Exemplos: `codex/ant-010-python-version` e `bruno/ant-018-minimal-tests`.
 - Uma branch deve conter uma tarefa ANT ou um grupo pequeno e inseparável da mesma fase.
 - Não misturar refatoração, UI, infraestrutura e funcionalidades sem dependência técnica demonstrada.
+- Manter no máximo uma branch e uma pull request ativa por agente, salvo autorização explícita para trabalho paralelo.
+- Apagar branches integradas ou substituídas quando já não contiverem trabalho único.
+
+## Acompanhamento do trabalho
+
+- O [estado da execução](docs/ANTONELLA_PROGRESS.md) regista a entrega atual, a próxima tarefa, as pull requests integradas e os riscos conhecidos.
+- O [plano mestre](docs/ANTONELLA_MASTER_ROADMAP.md) continua a ser a fonte do escopo e dos critérios `ANT-*`.
+- Atualizar o estado da execução na mesma pull request de cada entrega relevante.
+- Não criar issues para duplicar tarefas do plano mestre. Abrir uma issue apenas por decisão explícita do responsável pelo produto ou quando um bloqueio exigir discussão independente.
 
 ## Pull requests
 
