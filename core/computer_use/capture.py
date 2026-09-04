@@ -8,6 +8,7 @@ from typing import Any
 
 from core.computer_use.contracts import FrameSnapshot
 from core.display_selection import select_monitor
+from core.window_geometry import region_savings_ratio, resolve_window_region
 
 
 class RealtimeDesktopCapture:
@@ -17,6 +18,7 @@ class RealtimeDesktopCapture:
         fps: int = 10,
         change_threshold: float = 0.025,
         monitor_hint: int | str | None = None,
+        window_title: str = "",
         max_width: int = 1280,
         max_height: int = 720,
         jpeg_quality: int = 76,
@@ -24,6 +26,7 @@ class RealtimeDesktopCapture:
         self._fps = max(2, min(30, int(fps)))
         self._change_threshold = max(0.001, min(1.0, float(change_threshold)))
         self._monitor_hint = monitor_hint
+        self._window_title = str(window_title or "").strip()
         self._max_width = max_width
         self._max_height = max_height
         self._jpeg_quality = max(45, min(92, jpeg_quality))
@@ -97,7 +100,7 @@ class RealtimeDesktopCapture:
             import mss
             import numpy as np
             from PIL import Image
-        except ImportError as exc:
+        except ImportError:
             self._error = (
                 "Realtime Computer Use requires mss, numpy and Pillow from the locked install."
             )
@@ -108,6 +111,9 @@ class RealtimeDesktopCapture:
         previous_gray = None
         previous_geometry = None
         interval = 1.0 / self._fps
+        window_region = None
+        window_monitor_index = 0
+        window_region_checked_at = 0.0
 
         try:
             with mss.mss() as sct:
@@ -115,19 +121,47 @@ class RealtimeDesktopCapture:
                     started = time.perf_counter()
                     monitors = sct.monitors
                     point = _active_screen_point()
-                    target = select_monitor(
+                    base_monitor = select_monitor(
                         monitors,
                         point=point,
                         hint=self._monitor_hint,
                     )
-                    monitor_index = next(
+                    base_monitor_index = next(
                         (
                             index
                             for index, monitor in enumerate(monitors)
-                            if monitor == target
+                            if monitor == base_monitor
                         ),
                         0,
                     )
+
+                    target = base_monitor
+                    monitor_index = base_monitor_index
+                    capture_scope = "monitor"
+                    pixel_savings = 0.0
+
+                    if self._window_title:
+                        now = time.monotonic()
+                        if window_region is None or (now - window_region_checked_at) >= 0.75:
+                            resolved = resolve_window_region(self._window_title, monitors)
+                            window_region_checked_at = now
+                            if resolved is None:
+                                window_region = None
+                                window_monitor_index = 0
+                            else:
+                                window_region, window_monitor_index = resolved
+
+                        if window_region is not None:
+                            target = window_region
+                            monitor_index = window_monitor_index
+                            capture_scope = "window"
+                            reference_monitor = (
+                                monitors[monitor_index]
+                                if 0 < monitor_index < len(monitors)
+                                else base_monitor
+                            )
+                            pixel_savings = region_savings_ratio(target, reference_monitor)
+
                     shot = sct.grab(target)
                     rgb = np.frombuffer(shot.rgb, dtype=np.uint8).reshape(
                         shot.height,
@@ -142,6 +176,7 @@ class RealtimeDesktopCapture:
                         int(target["width"]),
                         int(target["height"]),
                         monitor_index,
+                        capture_scope,
                     )
                     changed_geometry = previous_geometry != geometry
                     change_score = _change_score(previous_gray, gray, np)
@@ -171,6 +206,8 @@ class RealtimeDesktopCapture:
                             monitor_index=monitor_index,
                             change_score=change_score,
                             jpeg_bytes=jpeg,
+                            capture_scope=capture_scope,
+                            pixel_savings=pixel_savings,
                         )
                         with self._condition:
                             self._latest = snapshot

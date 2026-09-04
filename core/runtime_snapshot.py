@@ -82,11 +82,15 @@ def build_runtime_snapshot(
     calls = int(agent.get("model_calls") or 0)
     batched = int(agent.get("batched_actions") or 0)
     saved_calls = int(agent.get("saved_model_calls") or 0)
+    capture_scope = str(agent.get("capture_scope") or "monitor").strip().lower()
+    capture_savings_pct = max(0, int(agent.get("capture_savings_pct") or 0))
 
     if agent_state in {"observing", "planning", "executing", "awaiting_approval"}:
         agent_detail = f"passo {step} · {calls} IA"
         if saved_calls:
             agent_detail += f" · {saved_calls} chamada(s) poupada(s)"
+        if capture_scope == "window" and capture_savings_pct:
+            agent_detail += f" · janela -{capture_savings_pct}% pixels"
     elif agent_state == "done" and agent.get("result"):
         agent_detail = str(agent.get("result"))[:80]
         if saved_calls:
@@ -113,4 +117,6 @@ def build_runtime_snapshot(
         "agent_model_calls": calls,
         "agent_batched_actions": batched,
         "agent_saved_model_calls": saved_calls,
+        "agent_capture_scope": capture_scope,
+        "agent_capture_savings_pct": capture_savings_pct,
     }

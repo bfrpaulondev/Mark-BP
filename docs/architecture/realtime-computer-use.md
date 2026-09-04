@@ -22,7 +22,9 @@ Computer Use é fallback, não substituto de ferramentas locais.
 ```text
 desktop ativo ou monitor escolhido
    ↓
-captura local multi-monitor 10–20 FPS
+janela-alvo resolvida localmente quando possível
+   ↓
+captura local 10–20 FPS: janela ROI ou monitor
    ↓
 detetor de alterações local
    ↓
@@ -43,6 +45,22 @@ planner recebe apenas o novo estado relevante
 
 Frames sem alteração significativa não originam chamadas de modelo.
 
+## Captura por janela — ROI local
+
+Quando `target_window` é informado, a Antonella tenta resolver a geometria real dessa janela através de Win32, sem screenshot e sem chamada de modelo. Se a janela for encontrada e estiver visível, o Computer Use captura somente o rectângulo dessa aplicação.
+
+Benefícios:
+
+- menos pixels de origem antes da compressão;
+- menos conteúdo irrelevante enviado ao planner visual;
+- melhor resolução efectiva da aplicação-alvo dentro do mesmo orçamento de imagem;
+- menor risco de incluir outras aplicações visíveis no monitor;
+- coordenadas continuam correctas no desktop virtual porque cada frame guarda `left/top/width/height` da ROI.
+
+A geometria é reavaliada periodicamente para acompanhar movimento/redimensionamento da janela. Se a janela deixar de ser resolvida, a captura volta automaticamente para o monitor escolhido/activo em vez de abortar a tarefa.
+
+`capture_scope` indica `window` ou `monitor`. `capture_savings_pct` estima a percentagem de pixels de origem evitados em relação ao monitor dominante e aparece na telemetria do agente.
+
 ## Micro-batching seguro
 
 O planner pode devolver até três ações numa única chamada, mas o runtime só mantém mais de uma quando a continuação é determinística e de baixo risco.
@@ -62,6 +80,8 @@ Cada ação extra realmente executada no micro-lote incrementa `saved_model_call
 A captura usa o desktop virtual do sistema. Por defeito segue o monitor que contém o centro da janela foreground. Também é possível escolher explicitamente `monitor 1`, `ecrã 2`, `segundo monitor`, `screen 3` ou `todos os ecrãs`.
 
 Coordenadas negativas são suportadas. O planner trabalha em coordenadas relativas à imagem e o actuator converte-as para coordenadas reais do desktop virtual.
+
+Uma ROI de janela pode atravessar dois monitores; o runtime mantém coordenadas do desktop virtual e associa a captura ao monitor com maior área visível da janela.
 
 ## Windows UI Automation
 
@@ -97,4 +117,4 @@ A integração usa `realtime_computer_use`, evitando aumentar o monólito `main.
 
 ## Limitações atuais
 
-Ainda não existe persistência cloud de runs/checkpoints, OCR local especializado, Policy Engine completo ou sobrevivência a reinício. O micro-batching é deliberadamente conservador: só elimina chamadas quando a sequência pode ser executada sem depender semanticamente de uma nova imagem.
+Ainda não existe persistência cloud de runs/checkpoints, OCR local especializado, Policy Engine completo ou sobrevivência a reinício. O micro-batching é deliberadamente conservador: só elimina chamadas quando a sequência pode ser executada sem depender semanticamente de uma nova imagem. A ROI por janela depende de a aplicação possuir uma janela Win32 visível resolvível pelo título; caso contrário, o fallback continua a ser a captura do monitor.
