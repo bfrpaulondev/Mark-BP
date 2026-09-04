@@ -164,8 +164,9 @@ class RealtimeComputerUseSession:
 
             history: list[str] = []
             no_change_count = 0
+            step = 1
 
-            for step in range(1, max_steps + 1):
+            while step <= max_steps:
                 if self._stop_event.is_set():
                     self._finish("stopped", result="Computer Use stopped by user.")
                     return
@@ -175,7 +176,7 @@ class RealtimeComputerUseSession:
                     self._state.step = step
                     self._state.monitor_index = frame.monitor_index
 
-                action = planner.next_action(
+                actions = planner.next_actions(
                     objective=self._state.objective,
                     frame=frame,
                     history=history,
@@ -184,93 +185,135 @@ class RealtimeComputerUseSession:
 
                 with self._lock:
                     self._state.model_calls = planner.calls
-                    self._state.last_action = action.history_line()
 
-                if action.action == "done":
-                    result = action.result or action.description or "Objective completed."
-                    self._finish("done", result=result)
-                    self._log(f"Computer Use · completed: {result}")
-                    return
-
-                if action.action == "fail":
-                    error = action.result or action.description or "Planner could not continue."
-                    self._finish("failed", error=error)
-                    self._log(f"Computer Use · stopped: {error}")
-                    return
-
-                decision = evaluate_action(action)
-                if not decision.allowed:
-                    if not decision.requires_approval:
-                        self._finish("failed", error=decision.reason)
-                        self._log(f"Computer Use · blocked: {decision.reason}")
+                for batch_index, action in enumerate(actions):
+                    if step > max_steps:
+                        self._finish(
+                            "failed",
+                            error=f"Computer Use reached the configured step limit ({max_steps}).",
+                        )
                         return
-
-                    with self._lock:
-                        self._state.state = "awaiting_approval"
-                        self._state.awaiting_approval = True
-                    self._approval_event.clear()
-                    self._log(
-                        "Computer Use · approval required: "
-                        f"{action.description or action.action}"
-                    )
-
-                    while not self._stop_event.is_set():
-                        if self._approval_event.wait(timeout=0.2):
-                            break
 
                     if self._stop_event.is_set():
                         self._finish("stopped", result="Computer Use stopped by user.")
                         return
 
-                with self._lock:
-                    self._state.state = "executing"
-                    self._state.awaiting_approval = False
+                    with self._lock:
+                        self._state.step = step
+                        self._state.last_action = action.history_line()
+                        if batch_index > 0:
+                            self._state.batched_actions += 1
+                            self._state.saved_model_calls += 1
 
-                previous_sequence = frame.sequence
-                result, expects_visual_change = execute_action(
-                    action,
-                    frame,
-                    player=self._player,
-                )
-                history.append(f"{action.history_line()} -> {result[:160]}")
-                history = history[-12:]
+                    if action.action == "done":
+                        result = action.result or action.description or "Objective completed."
+                        self._finish("done", result=result)
+                        self._log(f"Computer Use · completed: {result}")
+                        return
 
-                with self._lock:
-                    self._state.history = list(history)
+                    if action.action == "fail":
+                        error = action.result or action.description or "Planner could not continue."
+                        self._finish("failed", error=error)
+                        self._log(f"Computer Use · stopped: {error}")
+                        return
 
-                self._log(
-                    f"Computer Use · step {step}/{max_steps}: "
-                    f"{action.description or action.action}"
-                )
+                    decision = evaluate_action(action)
+                    if not decision.allowed:
+                        if not decision.requires_approval:
+                            self._finish("failed", error=decision.reason)
+                            self._log(f"Computer Use · blocked: {decision.reason}")
+                            return
 
-                if self._stop_event.is_set():
-                    self._finish("stopped", result="Computer Use stopped by user.")
-                    return
+                        with self._lock:
+                            self._state.state = "awaiting_approval"
+                            self._state.awaiting_approval = True
+                        self._approval_event.clear()
+                        self._log(
+                            "Computer Use · approval required: "
+                            f"{action.description or action.action}"
+                        )
 
-                if expects_visual_change:
-                    new_frame = capture.wait_for_change(
-                        after_sequence=previous_sequence,
-                        timeout=2.5,
+                        while not self._stop_event.is_set():
+                            if self._approval_event.wait(timeout=0.2):
+                                break
+
+                        if self._stop_event.is_set():
+                            self._finish("stopped", result="Computer Use stopped by user.")
+                            return
+
+                    with self._lock:
+                        self._state.state = "executing"
+                        self._state.awaiting_approval = False
+
+                    previous_sequence = frame.sequence
+                    result, expects_visual_change = execute_action(
+                        action,
+                        frame,
+                        player=self._player,
                     )
-                    if new_frame.sequence == previous_sequence:
-                        no_change_count += 1
+                    history.append(f"{action.history_line()} -> {result[:160]}")
+                    history = history[-12:]
+
+                    with self._lock:
+                        self._state.history = list(history)
+
+                    batch_label = " · lote" if batch_index > 0 else ""
+                    self._log(
+                        f"Computer Use · step {step}/{max_steps}{batch_label}: "
+                        f"{action.description or action.action}"
+                    )
+                    step += 1
+
+                    if self._stop_event.is_set():
+                        self._finish("stopped", result="Computer Use stopped by user.")
+                        return
+
+                    if expects_visual_change and not action.reobserve:
+                        # Advance the local frame baseline without a model call. The batching
+                        # policy guarantees the next action does not depend on new pixels.
+                        time.sleep(0.08)
+                        try:
+                            frame = capture.latest(timeout=0.35)
+                        except Exception:
+                            pass
+                        with self._lock:
+                            self._state.visual_updates = frame.sequence
+                            self._state.monitor_index = frame.monitor_index
+                        continue
+
+                    if expects_visual_change:
+                        new_frame = capture.wait_for_change(
+                            after_sequence=previous_sequence,
+                            timeout=2.5,
+                        )
+                        if new_frame.sequence == previous_sequence:
+                            no_change_count += 1
+                        else:
+                            no_change_count = 0
+                            time.sleep(0.08)
+                            try:
+                                new_frame = capture.latest(timeout=0.5)
+                            except Exception:
+                                pass
+                        frame = new_frame
                     else:
+                        time.sleep(min(1.0, action.seconds))
+                        frame = capture.latest(timeout=1.0)
+
+                    with self._lock:
+                        self._state.state = "observing"
+                        self._state.monitor_index = frame.monitor_index
+                        self._state.visual_updates = frame.sequence
+
+                    if no_change_count >= 3:
+                        history.append(
+                            "Three consecutive visual actions produced no meaningful screen change."
+                        )
                         no_change_count = 0
-                    frame = new_frame
-                else:
-                    time.sleep(min(1.0, action.seconds))
-                    frame = capture.latest(timeout=1.0)
 
-                with self._lock:
-                    self._state.state = "observing"
-                    self._state.monitor_index = frame.monitor_index
-                    self._state.visual_updates = frame.sequence
-
-                if no_change_count >= 3:
-                    history.append(
-                        "Three consecutive visual actions produced no meaningful screen change."
-                    )
-                    no_change_count = 0
+                    # A re-observation ends this model-generated micro-batch. The next
+                    # planner call receives the latest frame and verified history.
+                    break
 
             self._finish(
                 "failed",

@@ -46,16 +46,20 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 "model_calls": 2,
                 "provider": "openai",
                 "model": "gpt-test",
-                "monitor_requested": "monitor 3",
+                "requested_monitor": 3,
                 "monitor_index": 3,
+                "batched_actions": 2,
+                "saved_model_calls": 2,
             },
             display_status={"displays": [{"index": 3, "active": False}]},
         )
 
         self.assertEqual(snapshot["agent"], "A executar")
-        self.assertEqual(snapshot["agent_detail"], "passo 4 · 2 IA")
+        self.assertEqual(snapshot["agent_detail"], "passo 4 · 2 IA · 2 chamada(s) poupada(s)")
         self.assertEqual(snapshot["display"], "Ecrã 3")
         self.assertEqual(snapshot["cost"], "Qualidade")
+        self.assertEqual(snapshot["agent_batched_actions"], 2)
+        self.assertEqual(snapshot["agent_saved_model_calls"], 2)
 
 
 if __name__ == "__main__":

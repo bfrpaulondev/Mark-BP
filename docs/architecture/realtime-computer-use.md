@@ -8,7 +8,7 @@ A regra de custo é obrigatória:
 
 ```text
 API / ferramenta determinística
-→ DOM / UI Automation / ferramenta estruturada
+→ DOM / Windows UI Automation / ferramenta estruturada
 → processamento local
 → visão barata
 → modelo avançado
@@ -20,7 +20,7 @@ Computer Use é fallback, não substituto de ferramentas locais.
 ## Fluxo implementado
 
 ```text
-desktop ativo
+desktop ativo ou monitor escolhido
    ↓
 captura local multi-monitor 10–20 FPS
    ↓
@@ -30,20 +30,44 @@ frame relevante
    ↓
 planner visual com orçamento
    ↓
-ação de rato/teclado
+1 ação OU micro-lote seguro
+   ↓
+execução local de rato/teclado
    ↓
 captura continua localmente
    ↓
-espera alteração real
+espera alteração real quando necessária
    ↓
 planner recebe apenas o novo estado relevante
 ```
 
 Frames sem alteração significativa não originam chamadas de modelo.
 
+## Micro-batching seguro
+
+O planner pode devolver até três ações numa única chamada, mas o runtime só mantém mais de uma quando a continuação é determinística e de baixo risco.
+
+Exemplos permitidos:
+
+- clicar num campo estável e escrever nesse campo;
+- `Ctrl+A` num campo já focado e escrever a substituição;
+- `Tab` para o próximo campo conhecido e escrever.
+
+O runtime força nova observação antes de scroll, segundo clique por coordenadas, Enter/Return, waits, ações medium/high risk ou qualquer continuação que dependa de novos pixels. O modelo não pode alargar esta allowlist.
+
+Cada ação extra realmente executada no micro-lote incrementa `saved_model_calls`, tornando a poupança visível na telemetria/HUD.
+
 ## Multi-monitor
 
-A captura usa o desktop virtual do sistema e seleciona o monitor que contém o centro da janela foreground. Coordenadas negativas são suportadas. O planner trabalha em coordenadas relativas à imagem e o actuator converte-as para coordenadas reais do desktop virtual.
+A captura usa o desktop virtual do sistema. Por defeito segue o monitor que contém o centro da janela foreground. Também é possível escolher explicitamente `monitor 1`, `ecrã 2`, `segundo monitor`, `screen 3` ou `todos os ecrãs`.
+
+Coordenadas negativas são suportadas. O planner trabalha em coordenadas relativas à imagem e o actuator converte-as para coordenadas reais do desktop virtual.
+
+## Windows UI Automation
+
+Antes de recorrer a pixels em aplicações Windows normais, a Antonella pode usar `windows_ui_automation` para listar janelas e operar controlos expostos por UIA, como `Button`, `Edit`, `TabItem`, `ListItem` e `MenuItem`.
+
+Esta camada não usa tokens visuais. Interfaces remotas como ScreenConnect podem expor apenas uma superfície gráfica; nesses casos o router pode escalar para Realtime Computer Use.
 
 ## Modos de custo
 
@@ -63,10 +87,14 @@ A voz principal continua no Gemini Live. Provider de planeamento e provider de v
 
 O loop pausa antes de ações que aparentem apagar/remover dados, enviar/publicar/submeter, alterar permissões ou segurança, usar credenciais, fazer operações financeiras ou confirmar mudanças irreversíveis. A aprovação é de uso único. `stop` interrompe também uma espera de aprovação.
 
+Micro-batches não atravessam ações de risco: qualquer passo medium/high risk encerra a cadeia local e força nova decisão/observação.
+
 ## Plugin
 
 A integração usa `realtime_computer_use`, evitando aumentar o monólito `main.py`. Ações: `start`, `status`, `stop`, `approve`.
 
-## Limitações desta primeira entrega
+`display_manager` resolve e lista ecrãs sem modelo. `windows_ui_automation` oferece o caminho estruturado Windows antes de Computer Use.
 
-Ainda não existe persistência cloud de runs/checkpoints, Windows UI Automation integrada ao router, OCR local especializado, Policy Engine completo ou sobrevivência a reinício. O planner ainda faz uma chamada de visão por decisão relevante. Esta é uma primeira slice sobre o runtime atual.
+## Limitações atuais
+
+Ainda não existe persistência cloud de runs/checkpoints, OCR local especializado, Policy Engine completo ou sobrevivência a reinício. O micro-batching é deliberadamente conservador: só elimina chamadas quando a sequência pode ser executada sem depender semanticamente de uma nova imagem.
