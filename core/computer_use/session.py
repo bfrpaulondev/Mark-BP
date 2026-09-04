@@ -142,6 +142,7 @@ class RealtimeComputerUseSession:
                 fps=budget.capture_fps,
                 change_threshold=budget.change_threshold,
                 monitor_hint=self._state.requested_monitor,
+                window_title=self._state.target_window,
                 max_width=budget.max_image_width,
                 max_height=budget.max_image_height,
                 jpeg_quality=budget.jpeg_quality,
@@ -153,13 +154,21 @@ class RealtimeComputerUseSession:
                 self._state.state = "observing"
                 self._state.monitor_index = frame.monitor_index
                 self._state.visual_updates = frame.sequence
+                self._state.capture_scope = frame.capture_scope
+                self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
 
             requested = self._state.requested_monitor
             requested_text = "active" if requested is None else str(requested)
+            scope_text = (
+                f"window ROI, ~{int(round(frame.pixel_savings * 100))}% fewer source pixels"
+                if frame.capture_scope == "window"
+                else "full monitor"
+            )
             self._log(
                 "Computer Use · live capture started "
                 f"(requested={requested_text}, resolved monitor {frame.monitor_index}, "
-                f"{budget.capture_fps} FPS local, {planner.route.provider}/{planner.route.model})"
+                f"scope={scope_text}, {budget.capture_fps} FPS local, "
+                f"{planner.route.provider}/{planner.route.model})"
             )
 
             history: list[str] = []
@@ -175,6 +184,8 @@ class RealtimeComputerUseSession:
                     self._state.state = "planning"
                     self._state.step = step
                     self._state.monitor_index = frame.monitor_index
+                    self._state.capture_scope = frame.capture_scope
+                    self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
 
                 actions = planner.next_actions(
                     objective=self._state.objective,
@@ -269,8 +280,6 @@ class RealtimeComputerUseSession:
                         return
 
                     if expects_visual_change and not action.reobserve:
-                        # Advance the local frame baseline without a model call. The batching
-                        # policy guarantees the next action does not depend on new pixels.
                         time.sleep(0.08)
                         try:
                             frame = capture.latest(timeout=0.35)
@@ -279,6 +288,8 @@ class RealtimeComputerUseSession:
                         with self._lock:
                             self._state.visual_updates = frame.sequence
                             self._state.monitor_index = frame.monitor_index
+                            self._state.capture_scope = frame.capture_scope
+                            self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
                         continue
 
                     if expects_visual_change:
@@ -304,6 +315,8 @@ class RealtimeComputerUseSession:
                         self._state.state = "observing"
                         self._state.monitor_index = frame.monitor_index
                         self._state.visual_updates = frame.sequence
+                        self._state.capture_scope = frame.capture_scope
+                        self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
 
                     if no_change_count >= 3:
                         history.append(
@@ -311,8 +324,6 @@ class RealtimeComputerUseSession:
                         )
                         no_change_count = 0
 
-                    # A re-observation ends this model-generated micro-batch. The next
-                    # planner call receives the latest frame and verified history.
                     break
 
             self._finish(
