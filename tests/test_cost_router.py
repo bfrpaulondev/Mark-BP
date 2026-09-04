@@ -47,6 +47,7 @@ class CostRouterTests(unittest.TestCase):
     def test_cost_classes_keep_computer_use_as_last_resort(self):
         self.assertEqual(cost_class_for_tool("open_app"), "local")
         self.assertEqual(cost_class_for_tool("browser_control"), "structured")
+        self.assertEqual(cost_class_for_tool("windows_ui_automation"), "structured")
         self.assertEqual(cost_class_for_tool("screen_process"), "vision")
         self.assertEqual(cost_class_for_tool("realtime_computer_use"), "computer_use")
 
