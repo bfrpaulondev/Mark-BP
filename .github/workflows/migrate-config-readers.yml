@@ -1,0 +1,193 @@
+name: Migrate Antonella config readers
+
+on:
+  push:
+    branches:
+      - codex/ant-010-stabilization
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: codex/ant-010-stabilization
+
+      - name: Apply surgical reader migration
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              file = Path(path)
+              raw = file.read_bytes()
+              text = raw.decode("utf-8")
+              newline = "\r\n" if "\r\n" in text else "\n"
+              old_value = old.replace("\n", newline)
+              new_value = new.replace("\n", newline)
+              count = text.count(old_value)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
+              file.write_bytes(text.replace(old_value, new_value, 1).encode("utf-8"))
+
+          replace_once(
+              "main.py",
+              "from google.genai import types\n",
+              "from google.genai import types\nfrom config import get_gemini_key\n",
+          )
+          replace_once(
+              "main.py",
+              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+          )
+
+          replace_once(
+              "ui.py",
+              "import psutil\n",
+              "import psutil\n\nfrom config import get_config\n",
+          )
+          replace_once(
+              "ui.py",
+              'def _read_full_config() -> dict:\n    """Read api_keys.json config dict. Returns {} on any error."""\n    try:\n        return json.loads(API_FILE.read_text(encoding="utf-8"))\n    except Exception:\n        return {}\n',
+              'def _read_full_config() -> dict:\n    """Read the central typed configuration through the legacy-compatible dict."""\n    return get_config()\n',
+          )
+          replace_once(
+              "ui.py",
+              '    def _check_config(self) -> bool:\n        if not API_FILE.exists(): return False\n        try:\n            d = json.loads(API_FILE.read_text(encoding="utf-8"))\n            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))\n        except Exception:\n            return False\n',
+              '    def _check_config(self) -> bool:\n        d = get_config()\n        return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))\n',
+          )
+
+          simple_key_files = [
+              "actions/code_helper.py",
+              "actions/dev_agent.py",
+              "actions/file_processor.py",
+              "actions/desktop.py",
+              "actions/web_search.py",
+              "actions/youtube_video.py",
+          ]
+          for path in simple_key_files:
+              marker = "from pathlib import Path\n"
+              replacement = "from pathlib import Path\n\nfrom config import get_gemini_key\n"
+              replace_once(path, marker, replacement)
+
+          replace_once(
+              "actions/code_helper.py",
+              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+          )
+          replace_once(
+              "actions/dev_agent.py",
+              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+          )
+          replace_once(
+              "actions/file_processor.py",
+              'def _get_api_key() -> str:\n    config_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"\n    with open(config_path, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+          )
+          replace_once(
+              "actions/desktop.py",
+              'def _get_api_key() -> str:\n    path = _get_base_dir() / "config" / "api_keys.json"\n    with open(path, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+          )
+          replace_once(
+              "actions/web_search.py",
+              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+          )
+          replace_once(
+              "actions/youtube_video.py",
+              'def _get_api_key() -> str:\n    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:\n        return json.load(f)["gemini_api_key"]\n',
+              'def _get_api_key() -> str:\n    key = get_gemini_key()\n    if not key:\n        raise RuntimeError("gemini_api_key not found in configuration.")\n    return key\n',
+          )
+
+          replace_once(
+              "actions/computer_control.py",
+              "import random\nfrom pathlib import Path\n",
+              "import random\nfrom pathlib import Path\n\nfrom config import get_config\n",
+          )
+          replace_once(
+              "actions/computer_control.py",
+              'def _load_config() -> dict:\n    try:\n        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))\n    except Exception:\n        return {}\n',
+              'def _load_config() -> dict:\n    return get_config()\n',
+          )
+
+          replace_once(
+              "core/llm_client.py",
+              "import requests\n",
+              "import requests\n\nfrom config import get_config\n",
+          )
+          replace_once(
+              "core/llm_client.py",
+              'def _load_config() -> dict:\n    try:\n        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))\n    except Exception:\n        return {}\n',
+              'def _load_config() -> dict:\n    return get_config()\n',
+          )
+
+          replace_once(
+              "dashboard/server.py",
+              "from pathlib import Path\n",
+              "from pathlib import Path\n\nfrom config import get_gemini_key\n",
+          )
+          replace_once(
+              "dashboard/server.py",
+              'def _get_gemini_key() -> str | None:\n    try:\n        import json as _json\n        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:\n            return _json.load(f).get("gemini_api_key")\n    except Exception:\n        return None\n',
+              'def _get_gemini_key() -> str | None:\n    return get_gemini_key()\n',
+          )
+
+          replace_once(
+              "actions/screen_processor.py",
+              "from google.genai import types as gtypes\n",
+              "from google.genai import types as gtypes\nfrom config.settings import load_config, read_legacy_config, write_legacy_config\n",
+          )
+          replace_once(
+              "actions/screen_processor.py",
+              'def _load_config() -> dict:\n    try:\n        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))\n    except Exception:\n        return {}\n',
+              'def _load_config() -> dict:\n    return load_config(_CONFIG_PATH)\n',
+          )
+          replace_once(
+              "actions/screen_processor.py",
+              'def _save_config_key(key: str, value) -> None:\n    try:\n        cfg = _load_config()\n        cfg[key] = value\n        _CONFIG_PATH.write_text(json.dumps(cfg, indent=4), encoding="utf-8")\n    except Exception as e:\n        print(f"[Vision] ⚠️  Could not save config key \'{key}\': {e}")\n',
+              'def _save_config_key(key: str, value) -> None:\n    try:\n        cfg = read_legacy_config(_CONFIG_PATH)\n        cfg[key] = value\n        write_legacy_config(cfg, _CONFIG_PATH)\n    except Exception as e:\n        print(f"[Vision] ⚠️  Could not save config key \'{key}\': {e}")\n',
+          )
+
+      - name: Show remaining legacy config references
+        run: grep -R "api_keys.json" -n --include='*.py' . || true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.33"
+
+      - name: Verify dependency lock
+        run: |
+          uv lock --check
+          uv export --locked --no-dev --no-emit-project --output-file /tmp/requirements.txt
+          diff -u requirements.txt /tmp/requirements.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify Python baseline
+        run: |
+          python -m pip install --disable-pip-version-check "pydantic-settings==2.15.0"
+          python -m compileall -q actions core dashboard memory plugins main.py ui.py setup.py
+          python -m unittest discover -s tests -v
+
+      - name: Commit migrated readers
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add actions core dashboard main.py ui.py
+          git commit -m "refactor: route runtime config reads through settings"
+          git push origin HEAD:codex/ant-010-stabilization
