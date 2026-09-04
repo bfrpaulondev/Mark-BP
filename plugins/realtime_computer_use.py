@@ -9,10 +9,11 @@ PLUGIN = {
     "name": "realtime_computer_use",
     "description": (
         "Use ONLY for multi-step visual desktop tasks that cannot be completed with "
-        "cheaper structured tools such as open_app, browser_control, computer_settings, "
-        "computer_control, file_controller or file_processor. It keeps a local live "
-        "desktop capture, detects meaningful frame changes, and calls vision only when "
-        "needed. Good for remote desktops such as ScreenConnect or unknown desktop UIs. "
+        "cheaper structured tools such as open_app, browser_control, windows_ui_automation, "
+        "computer_settings, computer_control, file_controller or file_processor. It keeps a "
+        "local live desktop capture, detects meaningful frame changes, and calls vision only "
+        "when needed. Good for remote desktops such as ScreenConnect or unknown desktop UIs. "
+        "Use display_manager first when the user explicitly identifies monitor/screen 1/2/3. "
         "Actions: start, status, stop, approve. Never use this for a single click, scroll, "
         "typing command, browser DOM task, file operation, or app launch."
     ),
@@ -31,6 +32,13 @@ PLUGIN = {
                 "type": "STRING",
                 "description": (
                     "Optional local window title fragment to focus first, e.g. ScreenConnect."
+                ),
+            },
+            "monitor": {
+                "type": "STRING",
+                "description": (
+                    "Optional display target: active | all | 1 | 2 | 3 or 'monitor 2'. "
+                    "Omit to follow the foreground window automatically."
                 ),
             },
             "cost_mode": {
@@ -56,6 +64,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
             result = session.start(
                 objective=(parameters or {}).get("objective", ""),
                 target_window=(parameters or {}).get("target_window", ""),
+                monitor=(parameters or {}).get("monitor"),
                 cost_mode=(parameters or {}).get("cost_mode", ""),
                 max_steps=(parameters or {}).get("max_steps"),
                 player=player,

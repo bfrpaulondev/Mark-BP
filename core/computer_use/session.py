@@ -7,6 +7,7 @@ from typing import Any
 
 from config import get_config
 from core.computer_use.contracts import SessionState
+from core.display_selection import normalize_monitor_hint
 
 
 class RealtimeComputerUseSession:
@@ -23,6 +24,7 @@ class RealtimeComputerUseSession:
         *,
         objective: str,
         target_window: str = "",
+        monitor: int | str | None = None,
         cost_mode: str = "",
         max_steps: int | None = None,
         player=None,
@@ -45,6 +47,7 @@ class RealtimeComputerUseSession:
                 .strip()
                 .lower()
             )
+            requested_monitor = normalize_monitor_hint(monitor)
             self._player = player
             self._stop_event.clear()
             self._approval_event.clear()
@@ -52,6 +55,7 @@ class RealtimeComputerUseSession:
                 state="starting",
                 objective=objective,
                 target_window=str(target_window or "").strip(),
+                requested_monitor=requested_monitor,
                 cost_mode=mode,
             )
             self._thread = threading.Thread(
@@ -137,6 +141,7 @@ class RealtimeComputerUseSession:
             capture = RealtimeDesktopCapture(
                 fps=budget.capture_fps,
                 change_threshold=budget.change_threshold,
+                monitor_hint=self._state.requested_monitor,
                 max_width=budget.max_image_width,
                 max_height=budget.max_image_height,
                 jpeg_quality=budget.jpeg_quality,
@@ -149,10 +154,12 @@ class RealtimeComputerUseSession:
                 self._state.monitor_index = frame.monitor_index
                 self._state.visual_updates = frame.sequence
 
+            requested = self._state.requested_monitor
+            requested_text = "active" if requested is None else str(requested)
             self._log(
                 "Computer Use · live capture started "
-                f"(monitor {frame.monitor_index}, {budget.capture_fps} FPS local, "
-                f"{planner.route.provider}/{planner.route.model})"
+                f"(requested={requested_text}, resolved monitor {frame.monitor_index}, "
+                f"{budget.capture_fps} FPS local, {planner.route.provider}/{planner.route.model})"
             )
 
             history: list[str] = []
