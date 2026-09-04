@@ -39,8 +39,10 @@ class AntonellaSettings(BaseSettings):
 
     gemini_api_key: SecretStr | None = None
     os_system: Literal["windows", "mac", "linux"] = Field(default_factory=_platform_os)
-    assistant_name: str = "JARVIS"
+    assistant_name: str = "Antonella"
     user_name: str = ""
+    voice_name: str = "Kore"
+    voice_style: str = "feminine, warm, natural, calm, confident, concise and conversational"
     morning_brief_enabled: bool = True
     plugins_enabled: dict[str, bool] = Field(default_factory=dict)
     ui_color: str = ""
@@ -61,10 +63,19 @@ class AntonellaSettings(BaseSettings):
     @classmethod
     def normalize_assistant_name(cls, value: Any) -> str:
         normalized = str(value or "").strip()
-        return normalized or "JARVIS"
+        return normalized or "Antonella"
 
     # -.-.-.-
-    @field_validator("user_name", "ui_color", "llm_url", "llm_model", "llm_provider", mode="before")
+    @field_validator(
+        "user_name",
+        "voice_name",
+        "voice_style",
+        "ui_color",
+        "llm_url",
+        "llm_model",
+        "llm_provider",
+        mode="before",
+    )
     @classmethod
     def normalize_string(cls, value: Any) -> str:
         return str(value or "").strip()
@@ -145,6 +156,8 @@ def load_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
             "os_system": settings.os_system,
             "assistant_name": settings.assistant_name,
             "user_name": settings.user_name,
+            "voice_name": settings.voice_name,
+            "voice_style": settings.voice_style,
             "morning_brief_enabled": settings.morning_brief_enabled,
             "plugins_enabled": settings.plugins_enabled,
             "ui_color": settings.ui_color,

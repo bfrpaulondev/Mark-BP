@@ -91,14 +91,23 @@ class TypedSettingsTests(unittest.TestCase):
         self.assertEqual(saved["assistant_name"], "Antonella")
 
     # -.-.-.-
-    def test_invalid_json_falls_back_to_defaults(self):
+    def test_invalid_json_falls_back_to_antonella_defaults(self):
         self.config_file.write_text("{invalid", encoding="utf-8")
 
         self.assertEqual(read_legacy_config(self.config_file), {})
         settings = load_settings(self.config_file)
 
-        self.assertEqual(settings.assistant_name, "JARVIS")
+        self.assertEqual(settings.assistant_name, "Antonella")
+        self.assertEqual(settings.voice_name, "Kore")
+        self.assertIn("feminine", settings.voice_style)
         self.assertIn(settings.os_system, {"windows", "mac", "linux"})
+
+    # -.-.-.-
+    def test_voice_can_be_overridden_from_environment(self):
+        with patch.dict(os.environ, {"ANTONELLA_VOICE_NAME": "Aoede"}, clear=False):
+            config = load_config(self.config_file)
+
+        self.assertEqual(config["voice_name"], "Aoede")
 
     # -.-.-.-
     def test_unknown_legacy_fields_are_preserved_in_compatibility_dict(self):

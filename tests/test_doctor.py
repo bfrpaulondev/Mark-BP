@@ -14,15 +14,23 @@ class DoctorTests(unittest.TestCase):
         output = io.StringIO()
 
         with (
-            patch.object(doctor, "get_config", return_value={"stt_engine": "whisper", "tts_engine": "edgetts"}),
+            patch.object(
+                doctor,
+                "get_config",
+                return_value={"stt_engine": "whisper", "tts_engine": "edgetts", "voice_name": "Kore"},
+            ),
             patch.object(doctor, "get_gemini_key", return_value="configured-key"),
             patch.object(doctor, "missing_for_config", return_value=[]),
             patch.object(doctor, "PROMPT_PATH", Path(__file__)),
+            patch.object(doctor, "ANTONELLA_ENTRYPOINT", Path(__file__)),
+            patch.object(doctor, "ANTONELLA_UI", Path(__file__)),
         ):
             result = doctor.run_doctor(output)
 
+        text = output.getvalue()
         self.assertEqual(result, 0)
-        self.assertIn("Antonella is ready for a local smoke test", output.getvalue())
+        self.assertIn("voice=Kore", text)
+        self.assertIn("uv run python antonella.py", text)
 
     # -.-.-.-
     def test_missing_key_blocks_smoke_test(self):
@@ -33,6 +41,8 @@ class DoctorTests(unittest.TestCase):
             patch.object(doctor, "get_gemini_key", return_value=None),
             patch.object(doctor, "missing_for_config", return_value=[]),
             patch.object(doctor, "PROMPT_PATH", Path(__file__)),
+            patch.object(doctor, "ANTONELLA_ENTRYPOINT", Path(__file__)),
+            patch.object(doctor, "ANTONELLA_UI", Path(__file__)),
         ):
             result = doctor.run_doctor(output)
 
@@ -52,6 +62,8 @@ class DoctorTests(unittest.TestCase):
                 return_value=[("faster_whisper", "stt-whisper"), ("edge_tts", "tts-edge")],
             ),
             patch.object(doctor, "PROMPT_PATH", Path(__file__)),
+            patch.object(doctor, "ANTONELLA_ENTRYPOINT", Path(__file__)),
+            patch.object(doctor, "ANTONELLA_UI", Path(__file__)),
         ):
             result = doctor.run_doctor(output)
 
