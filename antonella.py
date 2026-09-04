@@ -14,6 +14,7 @@ from main import (
     load_memory,
 )
 from ui import JarvisUI
+from ui.runtime_dashboard import attach_runtime_dashboard
 
 
 DEFAULT_VOICE = "Kore"
@@ -99,6 +100,7 @@ class AntonellaLive(JarvisLive):
 # -.-.-.-
 def main() -> None:
     ui = JarvisUI()
+    attach_runtime_dashboard(ui)
 
     def runner() -> None:
         ui.wait_for_api_key()
