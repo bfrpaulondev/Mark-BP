@@ -19,7 +19,7 @@ Esta tabela descreve o estado que deve existir na `main`. Durante a revisão de 
 | Issues abertas | Nenhuma |
 | Próxima tarefa recomendada | `ANT-013` — configuração tipada |
 | Tarefa seguinte | `ANT-014` — remover instalações automáticas em runtime |
-| Última CI integrada | [PR #4 — CI concluída com sucesso](https://github.com/bfrpaulondev/Mark-BP/actions/runs/33880329607) |
+| Última CI integrada | [PR #5 — verificações obrigatórias](https://github.com/bfrpaulondev/Mark-BP/pull/5/checks) |
 
 ## Regras operacionais
 
@@ -38,6 +38,7 @@ Esta tabela descreve o estado que deve existir na `main`. Durante a revisão de 
 | [PR #2](https://github.com/bfrpaulondev/Mark-BP/pull/2) | `ANT-000`, `ANT-001`, `ANT-005` | Identidade, inventário técnico e política de contribuição | [ADR de identidade](adr/0001-antonella-project-identity.md), [inventário](current-state/legacy-inventory.md) e [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | [PR #3](https://github.com/bfrpaulondev/Mark-BP/pull/3) | `ANT-010`, `ANT-018`; parte de `ANT-019` | Baseline Python 3.11/3.12, testes mínimos e CI inicial | [suporte de Python](current-state/python-support.md), [`tests/`](../tests) e [workflow de CI](../.github/workflows/ci.yml) |
 | [PR #4](https://github.com/bfrpaulondev/Mark-BP/pull/4) | `ANT-011`, `ANT-012`, `ANT-020`; parte de `ANT-014` e `ANT-019` | Lock reproduzível, extras de voz e instalação documentada | [gestão de dependências](current-state/dependencies.md), [`pyproject.toml`](../pyproject.toml) e [`uv.lock`](../uv.lock) |
+| [PR #5](https://github.com/bfrpaulondev/Mark-BP/pull/5) | Extensão de `ANT-005` | Painel operacional único e regras de higiene para branches, pull requests e issues | Este documento e [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 
 ## Próxima sequência
 
