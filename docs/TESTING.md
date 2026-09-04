@@ -55,6 +55,38 @@ Valida:
 6. clicar em `CUSTO` ou `ESPECIALISTA` abre Preferências;
 7. análise visual segue por defeito o monitor onde está a janela foreground.
 
+## Browser real — navegação entre abas com verificação
+
+Abre Chrome, Edge ou Firefox normalmente com pelo menos duas abas diferentes e deixa o browser visível.
+
+Testa por voz:
+
+```text
+Antonella, vai para a próxima aba.
+Antonella, volta para a aba anterior.
+Antonella, lista as abas do Chrome.
+Antonella, muda para a aba do GitHub.
+```
+
+Requisitos:
+
+- para navegação entre abas do browser real deve aparecer `Verified control` no REGISTO;
+- `browser_control action=switch` não deve ser usado como navegação de abas;
+- a Antonella só pode dizer que mudou de aba quando o resultado tiver `verified=true`;
+- se não houver browser visível, se existirem vários browsers ambíguos ou se o Windows não permitir verificar a mudança, a Antonella deve dizer que não conseguiu confirmar — nunca afirmar `feito`;
+- quando existirem vários browsers, testa `no Chrome`, `no Edge`, etc.
+
+## Rato — movimento verificável
+
+Testa:
+
+```text
+Antonella, mexe o rato um pouco.
+Antonella, move o rato 100 pixels para a direita.
+```
+
+A posição física do cursor deve mudar. O resultado de `verified_desktop_control` deve indicar `verified=true` e incluir posição anterior, alvo e posição final. Se `verified=false`, a Antonella não pode afirmar que moveu o rato.
+
 ## Multi-monitor
 
 Coloca ScreenConnect num monitor secundário, torna-o foreground e pede para a Antonella olhar para essa janela. A resposta deve corresponder ao monitor secundário.
