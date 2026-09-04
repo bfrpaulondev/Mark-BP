@@ -1,4 +1,6 @@
 import io
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -57,6 +59,23 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("faster_whisper, edge_tts", text)
         self.assertIn("uv sync --locked --extra stt-whisper --extra tts-edge", text)
+
+    # -.-.-.-
+    def test_direct_script_execution_bootstraps_repository_imports(self):
+        root = Path(__file__).resolve().parent.parent
+        completed = subprocess.run(
+            [sys.executable, str(root / "scripts" / "doctor.py")],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        combined = completed.stdout + completed.stderr
+        self.assertNotIn("ModuleNotFoundError", combined)
+        self.assertNotIn("Traceback (most recent call last)", combined)
+        self.assertIn("[RESULT]", combined)
+        self.assertIn(completed.returncode, (0, 1))
 
 
 if __name__ == "__main__":
