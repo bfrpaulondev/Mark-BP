@@ -4,12 +4,16 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 from config import get_config, get_gemini_key
 from core.installer import missing_for_config
 
 
 SUPPORTED_PYTHON = {(3, 11), (3, 12)}
-BASE_DIR = Path(__file__).resolve().parent.parent
 PROMPT_PATH = BASE_DIR / "core" / "prompt.txt"
 
 
