@@ -19,6 +19,7 @@ dependencies = [
     "psutil",
     "pyautogui",
     "pycaw; sys_platform == 'win32'",
+    "pydantic-settings==2.15.0",
     "pygetwindow",
     "pyperclip",
     "pyqt6",
