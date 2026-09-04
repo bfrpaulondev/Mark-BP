@@ -35,7 +35,10 @@ except ImportError:
 
 from google import genai
 from google.genai import types as gtypes
+
 from config.settings import load_config, read_legacy_config, write_legacy_config
+from core.display_selection import select_monitor
+
 
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -43,14 +46,16 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-_BASE        = _base_dir()
+_BASE = _base_dir()
 _CONFIG_PATH = _BASE / "config" / "api_keys.json"
 
 
+# -.-.-.-
 def _load_config() -> dict:
     return load_config(_CONFIG_PATH)
 
 
+# -.-.-.-
 def _save_config_key(key: str, value) -> None:
     try:
         cfg = read_legacy_config(_CONFIG_PATH)
@@ -60,6 +65,7 @@ def _save_config_key(key: str, value) -> None:
         print(f"[Vision] ⚠️  Could not save config key '{key}': {e}")
 
 
+# -.-.-.-
 def _get_api_key() -> str:
     key = _load_config().get("gemini_api_key", "")
     if not key:
@@ -67,30 +73,45 @@ def _get_api_key() -> str:
     return key
 
 
+# -.-.-.-
 def _get_os() -> str:
     return _load_config().get("os_system", "windows").lower()
 
-_LIVE_MODEL         = "models/gemini-2.5-flash-native-audio-preview-12-2025"
-_CHANNELS           = 1
+
+_LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+_CHANNELS = 1
 _RECEIVE_SAMPLE_RATE = 24_000
-_CHUNK_SIZE         = 1_024
+_CHUNK_SIZE = 1_024
 
 _IMG_MAX_W = 1280
 _IMG_MAX_H = 720
-_JPEG_Q    = 82
-
-_SYSTEM_PROMPT = (
-    "You are JARVIS, Tony Stark's AI assistant. "
-    "You are given an image from either the user's screen or their webcam. "
-    "Analyze what you see with detail and intelligence. "
-    "Describe objects, text, people, components, and their context clearly. "
-    "For technical questions (circuits, code, hardware) give specific, expert answers. "
-    "Be concise — 2-4 sentences — unless the question demands more detail. "
-    "Speak directly to the user ('I can see...', 'You have...'). "
-    "Address the user as 'sir' depending on the language they used."
-)
+_JPEG_Q = 82
 
 
+# -.-.-.-
+def _vision_system_prompt() -> str:
+    cfg = _load_config()
+    assistant_name = (cfg.get("assistant_name") or "Antonella").strip() or "Antonella"
+    user_name = (cfg.get("user_name") or "").strip()
+    address = (
+        f"Address the user as '{user_name}' when natural. "
+        if user_name
+        else "Address the user naturally in the language they are using. "
+    )
+    return (
+        f"You are {assistant_name}, the user's personal AI assistant. "
+        "You are given an image from either the user's screen or webcam. "
+        "Analyze what you see with detail and intelligence. "
+        "Describe visible objects, text, controls, components, and context clearly. "
+        "For technical questions, give specific expert answers grounded only in what is visible. "
+        "Be concise unless the question requires more detail. "
+        "Speak directly to the user and never claim to see content outside the captured display. "
+        f"{address}"
+        "Never call yourself JARVIS, Mark, or any inherited project name."
+    )
+
+
+# -.-.-.-
 def _compress(img_bytes: bytes, source_format: str = "PNG") -> tuple[bytes, str]:
     if not _PIL:
         return img_bytes, f"image/{source_format.lower()}"
@@ -105,34 +126,70 @@ def _compress(img_bytes: bytes, source_format: str = "PNG") -> tuple[bytes, str]
         print(f"[Vision] ⚠️  Image compress failed: {e}")
         return img_bytes, f"image/{source_format.lower()}"
 
-def _capture_screen() -> tuple[bytes, str]:
 
+# -.-.-.-
+def _active_screen_point() -> tuple[int, int] | None:
+    if _get_os() != "windows":
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        rect = wintypes.RECT()
+        if hwnd and user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            width = rect.right - rect.left
+            height = rect.bottom - rect.top
+            if width > 0 and height > 0:
+                return rect.left + width // 2, rect.top + height // 2
+
+        cursor = wintypes.POINT()
+        if user32.GetCursorPos(ctypes.byref(cursor)):
+            return int(cursor.x), int(cursor.y)
+    except Exception as e:
+        print(f"[Vision] ⚠️  Could not resolve active display: {e}")
+
+    return None
+
+
+# -.-.-.-
+def _capture_screen(monitor_hint: int | str | None = None) -> tuple[bytes, str]:
     if not _MSS:
-        raise RuntimeError("mss is not installed. Run: pip install mss")
+        raise RuntimeError("mss is not installed. Run the locked project install first.")
 
     with mss.mss() as sct:
-        monitors = sct.monitors          # [0] = all combined, [1..n] = real screens
-        target   = monitors[1] if len(monitors) > 1 else monitors[0]
-        shot     = sct.grab(target)
-        png      = mss.tools.to_png(shot.rgb, shot.size)
+        monitors = sct.monitors
+        point = _active_screen_point()
+        target = select_monitor(monitors, point=point, hint=monitor_hint)
+        monitor_index = next((index for index, monitor in enumerate(monitors) if monitor == target), 0)
+        shot = sct.grab(target)
+        png = mss.tools.to_png(shot.rgb, shot.size)
+        print(
+            "[Vision] 🖥️  Captured monitor "
+            f"{monitor_index} at ({target['left']},{target['top']}) "
+            f"{target['width']}x{target['height']}"
+        )
 
     return _compress(png, "PNG")
 
 
+# -.-.-.-
 def _cv2_backend() -> int:
     """Return the best OpenCV camera backend for the current OS."""
     if not _CV2:
         return 0
     os_name = _get_os()
     if os_name == "windows":
-        return cv2.CAP_DSHOW    
+        return cv2.CAP_DSHOW
     if os_name == "mac":
-        return cv2.CAP_AVFOUNDATION  
+        return cv2.CAP_AVFOUNDATION
     return cv2.CAP_ANY
 
 
+# -.-.-.-
 def _probe_camera(index: int, backend: int, warmup: int = 5) -> bool:
-
     if not _CV2:
         return False
     cap = cv2.VideoCapture(index, backend)
@@ -148,8 +205,8 @@ def _probe_camera(index: int, backend: int, warmup: int = 5) -> bool:
     return bool(np.mean(frame) > 8)
 
 
+# -.-.-.-
 def _detect_camera_index() -> int:
-
     backend = _cv2_backend()
     print("[Vision] 🔍 Auto-detecting camera...")
     for idx in range(6):
@@ -164,6 +221,7 @@ def _detect_camera_index() -> int:
     return 0
 
 
+# -.-.-.-
 def _get_camera_index() -> int:
     cfg = _load_config()
     if "camera_index" in cfg:
@@ -171,13 +229,14 @@ def _get_camera_index() -> int:
     return _detect_camera_index()
 
 
+# -.-.-.-
 def _capture_camera() -> tuple[bytes, str]:
     if not _CV2:
-        raise RuntimeError("OpenCV (cv2) is not installed. Run: pip install opencv-python")
+        raise RuntimeError("OpenCV (cv2) is not installed. Run the locked project install first.")
 
-    index   = _get_camera_index()
+    index = _get_camera_index()
     backend = _cv2_backend()
-    cap     = cv2.VideoCapture(index, backend)
+    cap = cv2.VideoCapture(index, backend)
 
     if not cap.isOpened():
         raise RuntimeError(f"Camera index {index} could not be opened.")
@@ -202,17 +261,20 @@ def _capture_camera() -> tuple[bytes, str]:
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_Q])
     return buf.tobytes(), "image/jpeg"
 
+
 class _VisionSession:
     def __init__(self):
-        self._loop:       Optional[asyncio.AbstractEventLoop] = None
-        self._thread:     Optional[threading.Thread]          = None
-        self._session                                          = None
-        self._out_queue:  Optional[asyncio.Queue]             = None
-        self._audio_in:   Optional[asyncio.Queue]             = None
-        self._ready_evt:  threading.Event                     = threading.Event()
-        self._player                                           = None
-        self._lock:       threading.Lock                       = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._session = None
+        self._out_queue: Optional[asyncio.Queue] = None
+        self._audio_in: Optional[asyncio.Queue] = None
+        self._ready_evt: threading.Event = threading.Event()
+        self._player = None
+        self._lock: threading.Lock = threading.Lock()
+        self._assistant_name = "Antonella"
 
+    # -.-.-.-
     def start(self, player=None, timeout: float = 25.0) -> None:
         with self._lock:
             if self._thread and self._thread.is_alive():
@@ -231,6 +293,7 @@ class _VisionSession:
             raise RuntimeError(f"Vision session did not connect within {timeout}s.")
         print("[Vision] ✅ Session ready")
 
+    # -.-.-.-
     def analyze(self, image_bytes: bytes, mime_type: str, user_text: str) -> None:
         if not self._loop or not self._out_queue:
             print("[Vision] ⚠️  Session not started — dropping request")
@@ -240,17 +303,24 @@ class _VisionSession:
             self._loop,
         )
 
+    # -.-.-.-
     def is_ready(self) -> bool:
         return self._session is not None
 
+    # -.-.-.-
     def _run_event_loop(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._loop.run_until_complete(self._session_loop())
 
+    # -.-.-.-
     async def _session_loop(self) -> None:
         self._out_queue = asyncio.Queue(maxsize=30)
-        self._audio_in  = asyncio.Queue()
+        self._audio_in = asyncio.Queue()
+
+        cfg = _load_config()
+        self._assistant_name = (cfg.get("assistant_name") or "Antonella").strip() or "Antonella"
+        voice_name = (cfg.get("voice_name") or "Kore").strip() or "Kore"
 
         client = genai.Client(
             api_key=_get_api_key(),
@@ -259,11 +329,11 @@ class _VisionSession:
         config = gtypes.LiveConnectConfig(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
-            system_instruction=_SYSTEM_PROMPT,
+            system_instruction=_vision_system_prompt(),
             speech_config=gtypes.SpeechConfig(
                 voice_config=gtypes.VoiceConfig(
                     prebuilt_voice_config=gtypes.PrebuiltVoiceConfig(
-                        voice_name="Charon"
+                        voice_name=voice_name
                     )
                 )
             ),
@@ -278,7 +348,7 @@ class _VisionSession:
                 ) as session:
                     self._session = session
                     self._ready_evt.set()
-                    backoff = 2.0  
+                    backoff = 2.0
                     print("[Vision] ✅ Connected")
 
                     async with asyncio.TaskGroup() as tg:
@@ -296,8 +366,9 @@ class _VisionSession:
             print(f"[Vision] 🔄 Reconnecting in {backoff:.0f}s...")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 1.5, 30.0)
-            self._ready_evt.set()  
+            self._ready_evt.set()
 
+    # -.-.-.-
     async def _send_loop(self) -> None:
         while True:
             image_bytes, mime_type, user_text = await self._out_queue.get()
@@ -318,8 +389,9 @@ class _VisionSession:
                 print(f"[Vision] 📤 Sent {len(image_bytes):,} bytes — '{user_text[:60]}'")
             except Exception as e:
                 print(f"[Vision] ⚠️  Send error: {e}")
-                raise  # propagate to TaskGroup → triggers session reconnect
+                raise
 
+    # -.-.-.-
     async def _recv_loop(self) -> None:
         transcript: list[str] = []
         try:
@@ -340,10 +412,9 @@ class _VisionSession:
                     if transcript and self._player:
                         full = re.sub(r"\s+", " ", " ".join(transcript)).strip()
                         if full:
-                            self._player.write_log(f"Jarvis: {full}")
+                            self._player.write_log(f"{self._assistant_name}: {full}")
                             print(f"[Vision] 💬 {full}")
                     transcript = []
-                    # Auto-close camera ~2s after JARVIS finishes speaking
                     if self._player and hasattr(self._player, "stop_camera_stream"):
                         async def _deferred_close():
                             await asyncio.sleep(2.0)
@@ -355,8 +426,9 @@ class _VisionSession:
 
         except Exception as e:
             print(f"[Vision] ⚠️  Recv error: {e}")
-            raise  
+            raise
 
+    # -.-.-.-
     async def _play_loop(self) -> None:
         stream = sd.RawOutputStream(
             samplerate=_RECEIVE_SAMPLE_RATE,
@@ -376,11 +448,13 @@ class _VisionSession:
             stream.stop()
             stream.close()
 
-_session      = _VisionSession()
+
+_session = _VisionSession()
 _session_lock = threading.Lock()
-_session_up   = False
+_session_up = False
 
 
+# -.-.-.-
 def _ensure_session(player=None) -> None:
     global _session_up
     with _session_lock:
@@ -391,16 +465,17 @@ def _ensure_session(player=None) -> None:
             _session._player = player
 
 
+# -.-.-.-
 def screen_process(
-    parameters:     dict,
+    parameters: dict,
     response=None,
     player=None,
     session_memory=None,
 ) -> bool:
-
-    params    = parameters or {}
+    params = parameters or {}
     user_text = (params.get("text") or params.get("user_text") or "").strip()
-    angle     = params.get("angle", "screen").lower().strip()
+    angle = params.get("angle", "screen").lower().strip()
+    monitor_hint = params.get("monitor")
 
     if not user_text:
         print("[Vision] ⚠️  No question provided — aborting")
@@ -429,7 +504,7 @@ def screen_process(
                 except Exception as _e:
                     print(f"[Vision] ⚠️  Camera preview failed: {_e}")
         else:
-            image_bytes, mime_type = _capture_screen()
+            image_bytes, mime_type = _capture_screen(monitor_hint)
             print(f"[Vision] 🖥️  Screen: {len(image_bytes):,} bytes")
     except Exception as e:
         print(f"[Vision] ❌ Capture error: {e}")
@@ -439,17 +514,19 @@ def screen_process(
     return True
 
 
+# -.-.-.-
 def warmup_session(player=None) -> None:
     try:
         _ensure_session(player=player)
     except Exception as e:
         print(f"[Vision] ⚠️  Warmup failed: {e}")
 
+
 if __name__ == "__main__":
     print("[TEST] screen_processor.py")
     print("=" * 52)
     mode = input("angle — screen / camera (default: screen): ").strip().lower() or "screen"
-    q    = input("Question (Enter = default): ").strip() or "What do you see? Be brief."
+    q = input("Question (Enter = default): ").strip() or "What do you see? Be brief."
 
     t0 = time.perf_counter()
     warmup_session()
