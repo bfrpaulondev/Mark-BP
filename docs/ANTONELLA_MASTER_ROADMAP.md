@@ -397,7 +397,7 @@ A interface atual será substituída, não apenas retocada.
 - [x] **ANT-010 — Fixar Python suportado.** Selecionar versão oficial e criar ficheiros de configuração consistentes. Evidência: [suporte de Python](current-state/python-support.md) e [`.python-version`](../.python-version).
 - [x] **ANT-011 — Substituir `requirements.txt` aberto por dependências fixadas.** Gerar lockfile com hashes e dependências específicas por sistema operativo. Evidência: [`pyproject.toml`](../pyproject.toml), [`uv.lock`](../uv.lock), [`requirements.txt`](../requirements.txt) e [gestão de dependências](current-state/dependencies.md).
 - [x] **ANT-012 — Corrigir dependências de STT/TTS ausentes.** Garantir que toda importação opcional possui extra documentado e erro acionável. Evidência: [perfis opcionais](current-state/dependencies.md), [`core/stt.py`](../core/stt.py), [`core/tts.py`](../core/tts.py) e [testes](../tests/test_optional_voice_dependencies.py).
-- [ ] **ANT-013 — Criar configuração tipada.** Substituir leituras dispersas de JSON por Pydantic Settings e variáveis de ambiente.
+- [x] **ANT-013 — Criar configuração tipada.** Substituir leituras dispersas de JSON por Pydantic Settings e variáveis de ambiente. Evidência: [`config/settings.py`](../config/settings.py), [`tests/test_typed_settings.py`](../tests/test_typed_settings.py) e [estado da execução](ANTONELLA_PROGRESS.md).
 - [ ] **ANT-014 — Remover instalação automática de pacotes em runtime.** Instalações devem ocorrer apenas por processo explícito e auditado.
 - [ ] **ANT-015 — Criar logging estruturado.** IDs de correlação, níveis consistentes e redação de segredos/PII.
 - [ ] **ANT-016 — Criar tratamento global de erros.** Separar erros recuperáveis, configuração, fornecedor, permissão e falhas internas.
