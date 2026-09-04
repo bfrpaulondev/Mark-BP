@@ -58,13 +58,11 @@ class Palette:
     RED = "#ff6688"
 
 
-# -.-.-.-
 def _font(size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
     family = "Segoe UI Variable" if _OS == "Windows" else "Inter"
     return QFont(family, size, weight)
 
 
-# -.-.-.-
 def _icon_button(text: str, *, accent: bool = False) -> QPushButton:
     button = QPushButton(text)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -108,9 +106,7 @@ class MetricCard(QFrame):
 
         self.title_label = QLabel(title.upper())
         self.title_label.setFont(_font(8, QFont.Weight.Medium))
-        self.title_label.setStyleSheet(
-            f"color:{Palette.TEXT_MUTED};letter-spacing:1px;"
-        )
+        self.title_label.setStyleSheet(f"color:{Palette.TEXT_MUTED};letter-spacing:1px;")
         layout.addWidget(self.title_label)
 
         self.value_label = QLabel(value)
@@ -132,7 +128,6 @@ class MetricCard(QFrame):
             layout.addSpacing(2)
             layout.addWidget(self.progress)
 
-    # -.-.-.-
     def set_value(self, value: str, progress: int | None = None) -> None:
         self.value_label.setText(value)
         if self.progress is not None and progress is not None:
@@ -142,7 +137,7 @@ class MetricCard(QFrame):
 class ParticleOrb(QWidget):
     """Purple neural particle sphere inspired by the approved Antonella reference."""
 
-    PARTICLE_COUNT = 430
+    PARTICLE_COUNT = 320
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -158,9 +153,8 @@ class ParticleOrb(QWidget):
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(16)
+        self._timer.start(33)
 
-    # -.-.-.-
     def _make_particles(self) -> list[tuple[float, float, float, float, float]]:
         rng = random.Random(1709)
         particles: list[tuple[float, float, float, float, float]] = []
@@ -182,7 +176,6 @@ class ParticleOrb(QWidget):
             )
         return particles
 
-    # -.-.-.-
     def _tick(self) -> None:
         speed = 0.020 if self.speaking else 0.008
         if self.state in {"THINKING", "PROCESSING"}:
@@ -203,7 +196,6 @@ class ParticleOrb(QWidget):
         self._energy += (self._target_energy - self._energy) * 0.08
         self.update()
 
-    # -.-.-.-
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -261,7 +253,6 @@ class ParticleOrb(QWidget):
         label_rect = QRectF(0, center.y() + radius + 48, width, 26)
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
 
-    # -.-.-.-
     def _state_label(self) -> tuple[str, str]:
         if self.muted:
             return "MICROFONE EM PAUSA", Palette.RED
@@ -297,7 +288,6 @@ class LogView(QTextEdit):
             f".err{{color:{Palette.RED};}}"
         )
 
-    # -.-.-.-
     def append_event(self, text: str) -> None:
         clean = (
             text.replace("J.A.R.V.I.S.", self.assistant_name)
@@ -352,12 +342,10 @@ class DropZone(QFrame):
         self.label.setStyleSheet(f"color:{Palette.TEXT_MUTED};")
         layout.addWidget(self.label)
 
-    # -.-.-.-
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    # -.-.-.-
     def dropEvent(self, event) -> None:
         urls = event.mimeData().urls()
         if not urls:
@@ -367,7 +355,6 @@ class DropZone(QFrame):
             self.file_dropped.emit(path)
             event.acceptProposedAction()
 
-    # -.-.-.-
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.file_dropped.emit("")
@@ -464,7 +451,6 @@ class AntonellaWindow(QMainWindow):
             self._log.append_event("SYS: configura a chave Gemini para iniciar")
             QTimer.singleShot(250, self._configure_api_key)
 
-    # -.-.-.-
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
         header.setSpacing(12)
@@ -474,9 +460,7 @@ class AntonellaWindow(QMainWindow):
 
         name = QLabel("ANTONELLA")
         name.setFont(_font(20, QFont.Weight.Medium))
-        name.setStyleSheet(
-            f"color:{Palette.VIOLET_SOFT};letter-spacing:3px;"
-        )
+        name.setStyleSheet(f"color:{Palette.VIOLET_SOFT};letter-spacing:3px;")
         subtitle = QLabel("Adaptive neural companion")
         subtitle.setFont(_font(10))
         subtitle.setStyleSheet(f"color:{Palette.TEXT_MUTED};")
@@ -512,7 +496,6 @@ class AntonellaWindow(QMainWindow):
         header.addWidget(settings_button)
         return header
 
-    # -.-.-.-
     def _build_metrics_column(self) -> QWidget:
         panel = QWidget()
         panel.setFixedWidth(238)
@@ -531,7 +514,6 @@ class AntonellaWindow(QMainWindow):
         layout.addStretch()
         return panel
 
-    # -.-.-.-
     def _build_center_column(self) -> QVBoxLayout:
         center = QVBoxLayout()
         center.setContentsMargins(0, 0, 0, 0)
@@ -573,7 +555,6 @@ class AntonellaWindow(QMainWindow):
         center.addWidget(self._content_card)
         return center
 
-    # -.-.-.-
     def _build_log_column(self) -> QWidget:
         panel = QWidget()
         panel.setFixedWidth(310)
@@ -593,9 +574,7 @@ class AntonellaWindow(QMainWindow):
 
         header = QLabel("☷  REGISTO")
         header.setFont(_font(8, QFont.Weight.Medium))
-        header.setStyleSheet(
-            f"color:{Palette.TEXT_MUTED};letter-spacing:1px;"
-        )
+        header.setStyleSheet(f"color:{Palette.TEXT_MUTED};letter-spacing:1px;")
         log_layout.addWidget(header)
 
         self._log = LogView(self._assistant_name)
@@ -607,7 +586,6 @@ class AntonellaWindow(QMainWindow):
         layout.addWidget(self._drop_zone)
         return panel
 
-    # -.-.-.-
     def _build_command_bar(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(10)
@@ -637,7 +615,6 @@ class AntonellaWindow(QMainWindow):
         row.addWidget(self._mic_button)
         return row
 
-    # -.-.-.-
     def _tick_clock(self) -> None:
         self._clock_label.setText(time.strftime("%H:%M:%S"))
         weekdays = [
@@ -652,7 +629,6 @@ class AntonellaWindow(QMainWindow):
         weekday = weekdays[time.localtime().tm_wday]
         self._date_label.setText(f"{weekday}, {time.strftime('%d/%m')}")
 
-    # -.-.-.-
     def _update_metrics(self) -> None:
         try:
             import psutil
@@ -685,7 +661,6 @@ class AntonellaWindow(QMainWindow):
             self._mem_card.set_value("--", 0)
             self._net_card.set_value("--")
 
-    # -.-.-.-
     def _apply_state(self, state: str) -> None:
         state = state.upper()
         self.orb.state = state
@@ -705,13 +680,11 @@ class AntonellaWindow(QMainWindow):
                 f"QPushButton:hover{{background:{Palette.VIOLET_SOFT};}}"
             )
 
-    # -.-.-.-
     def _show_content(self, title: str, text: str) -> None:
         self._content_title.setText(title.upper()[:60])
         self._content_text.setPlainText(text[:8000])
         self._content_card.show()
 
-    # -.-.-.-
     def _send(self) -> None:
         text = self._input.text().strip()
         if not text:
@@ -721,7 +694,6 @@ class AntonellaWindow(QMainWindow):
         if self.on_text_command:
             threading.Thread(target=self.on_text_command, args=(text,), daemon=True).start()
 
-    # -.-.-.-
     def _toggle_mute(self) -> None:
         self._muted = not self._muted
         self.orb.muted = self._muted
@@ -732,19 +704,16 @@ class AntonellaWindow(QMainWindow):
             self._apply_state("LISTENING")
             self._log.append_event("SYS: microfone activo")
 
-    # -.-.-.-
     def _do_interrupt(self) -> None:
         if self.on_interrupt:
             self.on_interrupt()
 
-    # -.-.-.-
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
             self.showNormal()
         else:
             self.showFullScreen()
 
-    # -.-.-.-
     def _on_drop_zone(self, path: str) -> None:
         if path:
             self._attach_file(path)
@@ -753,7 +722,6 @@ class AntonellaWindow(QMainWindow):
         if selected:
             self._attach_file(selected)
 
-    # -.-.-.-
     def _attach_file(self, path: str) -> None:
         file_path = Path(path)
         if not file_path.exists() or not file_path.is_file():
@@ -768,7 +736,6 @@ class AntonellaWindow(QMainWindow):
             )
             threading.Thread(target=self.on_text_command, args=(command,), daemon=True).start()
 
-    # -.-.-.-
     def _configure_api_key(self) -> None:
         key, accepted = QInputDialog.getText(
             self,
@@ -791,13 +758,11 @@ class AntonellaWindow(QMainWindow):
         self._ready = True
         self._log.append_event("SYS: chave Gemini actualizada")
 
-    # -.-.-.-
     def _set_camera_mode(self, enabled: bool) -> None:
         self._visual_stack.setCurrentIndex(1 if enabled else 0)
         if not enabled:
             self._camera_label.clear()
 
-    # -.-.-.-
     def _show_camera_frame(self, data: bytes) -> None:
         pixmap = QPixmap()
         pixmap.loadFromData(data)
@@ -815,17 +780,11 @@ class AntonellaWindow(QMainWindow):
             )
         )
 
-    # -.-.-.-
     def start_camera_stream(self) -> None:
         self._cam_stop.clear()
         self._camera_stream_signal.emit(True)
-        threading.Thread(
-            target=self._camera_loop,
-            daemon=True,
-            name="antonella-camera",
-        ).start()
+        threading.Thread(target=self._camera_loop, daemon=True, name="antonella-camera").start()
 
-    # -.-.-.-
     def _camera_loop(self) -> None:
         try:
             import cv2
@@ -861,7 +820,6 @@ class AntonellaWindow(QMainWindow):
         finally:
             self._camera_stream_signal.emit(False)
 
-    # -.-.-.-
     def stop_camera_stream(self) -> None:
         self._cam_stop.set()
         self._camera_stream_signal.emit(False)
@@ -871,11 +829,9 @@ class _RootShim:
     def __init__(self, app: QApplication):
         self._app = app
 
-    # -.-.-.-
     def mainloop(self) -> None:
         self._app.exec()
 
-    # -.-.-.-
     def protocol(self, *_args) -> None:
         return None
 
