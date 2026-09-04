@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from config.settings import load_config, load_settings, read_legacy_config
+from config.settings import (
+    load_config,
+    load_legacy_compatible_config,
+    load_settings,
+    read_legacy_config,
+    write_legacy_config,
+)
 
 
 class TypedSettingsTests(unittest.TestCase):
@@ -56,6 +62,33 @@ class TypedSettingsTests(unittest.TestCase):
 
         self.assertEqual(config["assistant_name"], "Antonella")
         self.assertEqual(config["gemini_api_key"], "env-key-value-123456")
+
+    # -.-.-.-
+    def test_environment_secret_is_not_persisted_by_legacy_write_path(self):
+        self.config_file.write_text(
+            json.dumps(
+                {
+                    "gemini_api_key": "legacy-key-value-123456",
+                    "assistant_name": "Legacy",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict(
+            os.environ,
+            {"ANTONELLA_GEMINI_API_KEY": "env-key-value-123456"},
+            clear=False,
+        ):
+            runtime = load_legacy_compatible_config(self.config_file)
+            persisted = read_legacy_config(self.config_file)
+            persisted["assistant_name"] = "Antonella"
+            write_legacy_config(persisted, self.config_file)
+
+        saved = read_legacy_config(self.config_file)
+        self.assertEqual(runtime["gemini_api_key"], "env-key-value-123456")
+        self.assertEqual(saved["gemini_api_key"], "legacy-key-value-123456")
+        self.assertEqual(saved["assistant_name"], "Antonella")
 
     # -.-.-.-
     def test_invalid_json_falls_back_to_defaults(self):
