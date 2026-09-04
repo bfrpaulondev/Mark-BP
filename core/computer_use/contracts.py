@@ -46,6 +46,7 @@ class ComputerAction:
     confidence: float = 0.0
     risk: str = "low"
     result: str = ""
+    reobserve: bool = True
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ComputerAction":
@@ -64,6 +65,7 @@ class ComputerAction:
             confidence=max(0.0, min(1.0, _safe_float(payload.get("confidence"), 0.0))),
             risk=str(payload.get("risk") or "low").strip().lower(),
             result=str(payload.get("result") or "").strip(),
+            reobserve=_safe_bool(payload.get("reobserve"), True),
         )
 
     def history_line(self) -> str:
@@ -83,6 +85,8 @@ class SessionState:
     step: int = 0
     model_calls: int = 0
     visual_updates: int = 0
+    batched_actions: int = 0
+    saved_model_calls: int = 0
     last_action: str = ""
     last_error: str = ""
     result: str = ""
@@ -102,6 +106,8 @@ class SessionState:
             "step": self.step,
             "model_calls": self.model_calls,
             "visual_updates": self.visual_updates,
+            "batched_actions": self.batched_actions,
+            "saved_model_calls": self.saved_model_calls,
             "last_action": self.last_action,
             "last_error": self.last_error,
             "result": self.result,
@@ -132,3 +138,18 @@ def _safe_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _safe_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    return default
