@@ -15,6 +15,8 @@ from core.installer import missing_for_config
 
 SUPPORTED_PYTHON = {(3, 11), (3, 12)}
 PROMPT_PATH = BASE_DIR / "core" / "prompt.txt"
+ANTONELLA_ENTRYPOINT = BASE_DIR / "antonella.py"
+ANTONELLA_UI = BASE_DIR / "ui" / "__init__.py"
 
 
 # -.-.-.-
@@ -57,10 +59,17 @@ def run_doctor(stream: TextIO = sys.stdout) -> int:
         )
 
     if PROMPT_PATH.is_file():
-        _write(stream, "PASS", "System prompt is present.")
+        _write(stream, "PASS", "Antonella system prompt is present.")
     else:
         failures += 1
         _write(stream, "FAIL", "core/prompt.txt is missing.")
+
+    if ANTONELLA_ENTRYPOINT.is_file() and ANTONELLA_UI.is_file():
+        voice_name = str(config.get("voice_name") or "Kore")
+        _write(stream, "PASS", f"Antonella desktop UI and voice profile are present (voice={voice_name}).")
+    else:
+        failures += 1
+        _write(stream, "FAIL", "Antonella desktop UI or antonella.py entrypoint is missing.")
 
     missing = missing_for_config(config)
     if not missing:
@@ -79,7 +88,7 @@ def run_doctor(stream: TextIO = sys.stdout) -> int:
         _write(stream, "RESULT", f"Antonella is not ready for smoke testing ({failures} blocking check(s)).")
         return 1
 
-    _write(stream, "RESULT", "Antonella is ready for a local smoke test. Run: uv run python main.py")
+    _write(stream, "RESULT", "Antonella is ready for a local smoke test. Run: uv run python antonella.py")
     return 0
 
 
