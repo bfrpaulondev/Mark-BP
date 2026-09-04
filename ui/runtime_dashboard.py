@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -12,6 +12,7 @@ from core.runtime_snapshot import build_runtime_snapshot
 _BG = "#080910"
 _SURFACE_2 = "#0b0c15"
 _BORDER = "#24263a"
+_BORDER_HOVER = "#35384f"
 _TEXT = "#f5f2ff"
 _MUTED = "#8f93b8"
 _FAINT = "#626782"
@@ -28,15 +29,16 @@ def _font(size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
 
 
 class RuntimeChip(QFrame):
+    clicked = pyqtSignal()
+
     def __init__(self, title: str, value: str, *, accent: str, parent: QWidget | None = None):
         super().__init__(parent)
         self._accent = accent
+        self._interactive = False
         self.setObjectName("runtimeChip")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMinimumHeight(50)
-        self.setStyleSheet(
-            f"QFrame#runtimeChip{{background:{_SURFACE_2};border:1px solid {_BORDER};border-radius:11px;}}"
-        )
+        self._apply_style()
 
         row = QHBoxLayout(self)
         row.setContentsMargins(12, 8, 12, 8)
@@ -63,11 +65,36 @@ class RuntimeChip(QFrame):
         stack.addWidget(self._value)
         row.addLayout(stack, stretch=1)
 
+    def _apply_style(self) -> None:
+        hover = (
+            f"QFrame#runtimeChip:hover{{border-color:{_BORDER_HOVER};background:#0e101a;}}"
+            if self._interactive
+            else ""
+        )
+        self.setStyleSheet(
+            f"QFrame#runtimeChip{{background:{_SURFACE_2};border:1px solid {_BORDER};border-radius:11px;}}"
+            + hover
+        )
+
+    def set_interactive(self, enabled: bool = True) -> None:
+        self._interactive = enabled
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ArrowCursor
+        )
+        self._apply_style()
+
     def set_value(self, value: str, *, accent: str | None = None, tooltip: str = "") -> None:
         self._value.setText(value)
         if accent:
             self._dot.setStyleSheet(f"color:{accent};")
         self.setToolTip(tooltip)
+
+    def mousePressEvent(self, event) -> None:
+        if self._interactive and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class RuntimeDashboard(QWidget):
@@ -92,6 +119,13 @@ class RuntimeDashboard(QWidget):
         for chip in (self._live, self._expert, self._cost, self._display, self._agent):
             row.addWidget(chip)
 
+        self._expert.set_interactive(True)
+        self._cost.set_interactive(True)
+        self._agent.set_interactive(True)
+        self._expert.clicked.connect(self._open_settings)
+        self._cost.clicked.connect(self._open_settings)
+        self._agent.clicked.connect(self._open_agent_control)
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh)
         self._timer.start(1600)
@@ -99,12 +133,41 @@ class RuntimeDashboard(QWidget):
 
         self._focus_shortcut = QShortcut(QKeySequence("Ctrl+K"), host_window)
         self._focus_shortcut.activated.connect(self._focus_command)
+        self._agent_shortcut = QShortcut(QKeySequence("Ctrl+Shift+A"), host_window)
+        self._agent_shortcut.activated.connect(self._open_agent_control)
 
     def _focus_command(self) -> None:
         command = getattr(self._host, "_input", None)
         if command is not None:
             command.setFocus()
             command.selectAll()
+
+    def _open_agent_control(self) -> None:
+        try:
+            from ui.agent_control import show_agent_control
+
+            show_agent_control(self._host)
+        except Exception as exc:
+            try:
+                self._host._log.append_event(
+                    f"ERR: painel do agente indisponível · {type(exc).__name__}"
+                )
+            except Exception:
+                pass
+
+    def _open_settings(self) -> None:
+        try:
+            from ui.settings_dialog import AntonellaSettingsDialog
+
+            AntonellaSettingsDialog(self._host).exec()
+            self.refresh()
+        except Exception as exc:
+            try:
+                self._host._log.append_event(
+                    f"ERR: preferências indisponíveis · {type(exc).__name__}"
+                )
+            except Exception:
+                pass
 
     def refresh(self) -> None:
         try:
@@ -134,9 +197,9 @@ class RuntimeDashboard(QWidget):
             str(snapshot.get("expert") or "Opcional"),
             accent=_GREEN if expert_ready else _FAINT,
             tooltip=(
-                "OpenAI especialista disponível sob demanda."
+                "OpenAI especialista disponível sob demanda · clica para configurar."
                 if expert_ready
-                else "Configura ANTONELLA_OPENAI_API_KEY para activar o especialista opcional."
+                else "Especialista opcional · clica para configurar OpenAI."
             ),
         )
 
@@ -145,7 +208,7 @@ class RuntimeDashboard(QWidget):
         self._cost.set_value(
             str(snapshot.get("cost") or "Económico"),
             accent=cost_accent,
-            tooltip="Computer Use só escala custo quando a tarefa realmente exige visão.",
+            tooltip="Modo de custo do Computer Use · clica para alterar.",
         )
 
         display_count = int(snapshot.get("display_count") or 0)
@@ -176,7 +239,8 @@ class RuntimeDashboard(QWidget):
         self._agent.set_value(
             agent_value,
             accent=agent_accent,
-            tooltip=str(snapshot.get("agent_detail") or "Computer Use disponível"),
+            tooltip=(str(snapshot.get("agent_detail") or "Computer Use disponível")
+                     + " · clica para abrir o controlo")
         )
 
 
