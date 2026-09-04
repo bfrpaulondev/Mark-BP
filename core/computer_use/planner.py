@@ -137,6 +137,7 @@ def _build_prompt(
     step: int,
 ) -> str:
     recent_history = "\n".join(f"- {line}" for line in history[-8:]) or "- none"
+    savings_pct = int(round(frame.pixel_savings * 100))
     return f"""
 You are Antonella's visual desktop planner.
 
@@ -147,10 +148,17 @@ CURRENT FRAME:
 - step: {step}
 - image coordinates: 0..{max(0, frame.image_width - 1)} x 0..{max(0, frame.image_height - 1)}
 - captured monitor: {frame.monitor_index}
-- monitor change score: {frame.change_score:.4f}
+- capture scope: {frame.capture_scope}
+- source pixel reduction versus full monitor: {savings_pct}%
+- screen change score: {frame.change_score:.4f}
 
 RECENT ACTIONS:
 {recent_history}
+
+If capture scope is "window", the image is intentionally cropped to the target application's
+visible window. Treat the image edges as that window's current boundaries. Do not infer content
+outside the crop. Coordinates are still mapped correctly to the real virtual desktop by the
+local actuator.
 
 Return the smallest safe plan that moves toward the objective. Normally return ONE action.
 You MAY return up to {MAX_ACTIONS_PER_PLAN} actions only when later actions are deterministic
