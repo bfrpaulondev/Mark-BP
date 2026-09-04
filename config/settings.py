@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import sys
 from pathlib import Path
@@ -104,6 +105,33 @@ def write_legacy_config(data: dict[str, Any], config_file: Path = CONFIG_FILE) -
 # -.-.-.-
 def load_settings(config_file: Path = CONFIG_FILE) -> AntonellaSettings:
     return AntonellaSettings(**read_legacy_config(config_file))
+
+
+# -.-.-.-
+def _unwrap_setting_value(value: Any) -> Any:
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    return value
+
+
+# -.-.-.-
+def _has_environment_override(field_name: str) -> bool:
+    expected = f"ANTONELLA_{field_name}".lower()
+    return any(key.lower() == expected for key in os.environ)
+
+
+# -.-.-.-
+def load_legacy_compatible_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
+    """Preserve the old sparse dict while applying explicit environment overrides."""
+    data = read_legacy_config(config_file)
+    settings = load_settings(config_file)
+
+    for field_name in AntonellaSettings.model_fields:
+        if not _has_environment_override(field_name):
+            continue
+        data[field_name] = _unwrap_setting_value(getattr(settings, field_name))
+
+    return data
 
 
 # -.-.-.-
