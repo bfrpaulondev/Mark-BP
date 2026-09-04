@@ -106,11 +106,28 @@ def resolve_window_region(
         return None
 
     user32 = ctypes.windll.user32
+    EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    try:
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        user32.IsWindowVisible.restype = wintypes.BOOL
+        user32.IsIconic.argtypes = [wintypes.HWND]
+        user32.IsIconic.restype = wintypes.BOOL
+        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        user32.GetWindowTextLengthW.restype = ctypes.c_int
+        user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.GetWindowTextW.restype = ctypes.c_int
+        user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        user32.GetWindowRect.restype = wintypes.BOOL
+        user32.EnumWindows.argtypes = [EnumWindowsProc, wintypes.LPARAM]
+        user32.EnumWindows.restype = wintypes.BOOL
+    except Exception:
+        return None
+
     needle = title_fragment.casefold()
     foreground = user32.GetForegroundWindow()
     candidates: list[tuple[int, int, dict[str, int]]] = []
-
-    EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
     def _collect(hwnd, _lparam):
         try:
@@ -147,8 +164,9 @@ def resolve_window_region(
             pass
         return True
 
+    callback = EnumWindowsProc(_collect)
     try:
-        user32.EnumWindows(EnumWindowsProc(_collect), 0)
+        user32.EnumWindows(callback, 0)
     except Exception:
         return None
 
