@@ -18,13 +18,13 @@ uv run playwright install chromium
 $env:ANTONELLA_GEMINI_API_KEY="A_TUA_CHAVE"
 ```
 
-OpenAI é opcional para o planner visual:
+OpenAI é opcional para especialista e planner visual:
 
 ```powershell
 $env:ANTONELLA_OPENAI_API_KEY="A_TUA_CHAVE"
 ```
 
-Com `auto`, OpenAI é usado no Computer Use quando a chave existe; a voz continua no Gemini Live. Podes forçar `ANTONELLA_MODEL_PROVIDER_PREFERENCE="openai"` ou `"gemini"`.
+Com `auto`, OpenAI pode ser usado pelo especialista/Computer Use quando a chave existe; a voz continua no Gemini Live. Podes preferir `ANTONELLA_MODEL_PROVIDER_PREFERENCE="openai"` ou `"gemini"`.
 
 O modo de custo default é:
 
@@ -33,6 +33,8 @@ $env:ANTONELLA_COMPUTER_USE_COST_MODE="economy"
 ```
 
 Outras opções: `balanced`, `quality`.
+
+Estas preferências também podem ser alteradas no botão `•••`. As chaves introduzidas pelo centro de preferências ficam apenas na sessão actual do processo; para persistência usa variáveis de ambiente `ANTONELLA_*`.
 
 ## Doctor e arranque
 
@@ -43,11 +45,35 @@ uv run python antonella.py
 
 ## Smoke normal
 
-Valida UI, voz, interrupção, texto, aplicações, browser, ficheiros e análise do monitor onde está a janela ativa.
+Valida:
+
+1. UI Antonella abre com orb, CPU/MEM/NET/CORE STATUS, REGISTO, drop-zone e command bar;
+2. faixa de runtime mostra `LIVE`, `ESPECIALISTA`, `CUSTO`, `VISÃO` e `AGENTE`;
+3. `Ctrl+K` foca a caixa `Diz alguma coisa…`;
+4. voz, interrupção, mute, texto, aplicações, browser e ficheiros continuam funcionais;
+5. `•••` abre Preferências e não mostra valores das chaves já configuradas;
+6. clicar em `CUSTO` ou `ESPECIALISTA` abre Preferências;
+7. análise visual segue por defeito o monitor onde está a janela foreground.
 
 ## Multi-monitor
 
 Coloca ScreenConnect num monitor secundário, torna-o foreground e pede para a Antonella olhar para essa janela. A resposta deve corresponder ao monitor secundário.
+
+Testa também selecção explícita:
+
+```text
+Antonella, que ecrãs tenho?
+Antonella, usa o segundo monitor.
+Antonella, usa o ecrã 3 para esta tarefa.
+```
+
+Devem funcionar aliases como `ecrã 2`, `monitor dois`, `segundo monitor`, `screen 3` e `todos os ecrãs`.
+
+## Windows UI Automation — caminho sem visão
+
+Numa aplicação Windows normal, pede primeiro uma tarefa de navegação simples. Quando a aplicação expõe controlos UIA, a Antonella deve preferir `windows_ui_automation` a screenshots/Computer Use.
+
+O objectivo é confirmar que botões, campos, tabs e listas acessíveis podem ser lidos/accionados sem chamadas de visão.
 
 ## Realtime Computer Use
 
@@ -57,9 +83,23 @@ Usa uma tarefa realmente visual:
 Antonella, usa Computer Use em modo económico no ScreenConnect e procura nesta aplicação onde posso ver as permissões deste utilizador. Não alteres nada.
 ```
 
-Confirma no REGISTO: `live capture started`, monitor correto, provider/model, passos e conclusão/limite explícito.
+Confirma no REGISTO: `live capture started`, monitor correcto, provider/model, passos e conclusão/limite explícito.
 
-Durante a execução:
+O `AGENTE` do HUD deve mudar de estado durante a tarefa. Clica nele ou usa `Ctrl+Shift+A` para abrir o painel de controlo.
+
+No painel do agente confirma:
+
+- objectivo actual;
+- passo;
+- chamadas IA;
+- chamadas poupadas por micro-batching;
+- ecrã;
+- provider/model;
+- histórico recente;
+- `PARAR AGENTE`;
+- `APROVAR 1 PASSO` disponível apenas quando a sessão realmente aguarda aprovação.
+
+Durante a execução também continua válido:
 
 ```text
 Antonella, pára o Computer Use.
@@ -67,4 +107,10 @@ Antonella, pára o Computer Use.
 
 Deve parar sem fechar a Antonella.
 
-Num ambiente de teste, uma ação de gravação/permissões deve pausar para aprovação explícita.
+Num ambiente de teste, uma ação de gravação/permissões deve pausar para aprovação explícita. A aprovação é apenas para o passo pendente.
+
+## Teste de custo / micro-batching
+
+Usa uma interface de teste com um campo de texto visível e pede uma tarefa que exija focar o campo e escrever. Quando o planner conseguir devolver um micro-lote seguro, `saved_model_calls` deve aumentar sem eliminar a verificação visual posterior.
+
+Não deve haver batching entre dois clicks por coordenadas, após scroll, Enter/Return ou em ações medium/high risk.
