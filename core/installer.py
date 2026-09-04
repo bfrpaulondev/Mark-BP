@@ -6,9 +6,14 @@ installed only by the explicit, reproducible project setup process.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import platform
 from typing import Callable
 
+from core.structured_logging import get_logger, log_event
+
+
+_LOGGER = get_logger("installer")
 
 # Each entry: (import_name, install_profile)
 _CORE: list[tuple[str, str]] = [
@@ -96,6 +101,7 @@ def install_for_config(config: dict, log: Callable | None = None) -> None:
     """
     missing = missing_for_config(config)
     if not missing:
+        log_event(_LOGGER, logging.INFO, "dependency_readiness_ok")
         if log:
             log("SYS: All selected dependencies are already installed.")
         return
@@ -107,6 +113,13 @@ def install_for_config(config: dict, log: Callable | None = None) -> None:
         extras = " ".join(f"--extra {profile}" for profile in profiles)
         command = f"{command} {extras}"
 
+    log_event(
+        _LOGGER,
+        logging.WARNING,
+        "dependency_readiness_failed",
+        modules=[module for module, _ in missing],
+        command=command,
+    )
     if log:
         log(f"ERR: Missing dependencies: {modules}")
         log(f"SYS: Runtime installation is disabled. Run explicitly: {command}")
