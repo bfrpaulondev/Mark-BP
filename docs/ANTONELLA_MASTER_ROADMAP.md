@@ -394,7 +394,7 @@ A interface atual será substituída, não apenas retocada.
 
 ## Fase 1 — Estabilização do fork
 
-- [ ] **ANT-010 — Fixar Python suportado.** Selecionar versão oficial e criar ficheiros de configuração consistentes.
+- [x] **ANT-010 — Fixar Python suportado.** Selecionar versão oficial e criar ficheiros de configuração consistentes. Evidência: [suporte de Python](current-state/python-support.md) e [`.python-version`](../.python-version).
 - [ ] **ANT-011 — Substituir `requirements.txt` aberto por dependências fixadas.** Gerar lockfile com hashes e dependências específicas por sistema operativo.
 - [ ] **ANT-012 — Corrigir dependências de STT/TTS ausentes.** Garantir que toda importação opcional possui extra documentado e erro acionável.
 - [ ] **ANT-013 — Criar configuração tipada.** Substituir leituras dispersas de JSON por Pydantic Settings e variáveis de ambiente.
@@ -402,7 +402,7 @@ A interface atual será substituída, não apenas retocada.
 - [ ] **ANT-015 — Criar logging estruturado.** IDs de correlação, níveis consistentes e redação de segredos/PII.
 - [ ] **ANT-016 — Criar tratamento global de erros.** Separar erros recuperáveis, configuração, fornecedor, permissão e falhas internas.
 - [ ] **ANT-017 — Adicionar lint, formatter e type checking.** Configurar Ruff, formatter e verificação estática adequada.
-- [ ] **ANT-018 — Criar suíte mínima de testes.** Cobrir configuração, memória atual, plugin loader e dispatch de ferramentas.
+- [x] **ANT-018 — Criar suíte mínima de testes.** Cobrir configuração, memória atual, plugin loader e dispatch de ferramentas. Evidência: [`tests/`](../tests/).
 - [ ] **ANT-019 — Criar CI inicial.** Lint, tipos, testes, auditoria de dependências e verificação de segredos.
 - [ ] **ANT-020 — Documentar instalação reproduzível.** Windows como plataforma primária; macOS/Linux apenas quando testados.
 
@@ -827,4 +827,3 @@ Este ficheiro é a fonte de verdade do plano até que as tarefas sejam migradas 
 - Alterações arquiteturais exigem ADR.
 - Nenhuma fase avança oficialmente sem cumprir o respetivo gate.
 - O roadmap descreve intenção futura; não afirma que funcionalidades ainda não implementadas já existem.
-

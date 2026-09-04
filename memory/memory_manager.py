@@ -92,6 +92,13 @@ def _recursive_update(target: dict, updates: dict) -> bool:
             continue
         if isinstance(value, str) and not value.strip():
             continue
+        if (
+            isinstance(value, dict)
+            and "value" in value
+            and isinstance(value["value"], str)
+            and not value["value"].strip()
+        ):
+            continue
         if isinstance(value, dict) and "value" not in value:
             if key not in target or not isinstance(target[key], dict):
                 target[key] = {}

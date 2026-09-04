@@ -1,6 +1,19 @@
 > [!IMPORTANT]
 > **Transição para Antonella:** a implementação atual continua a ser o protótipo herdado Mark/JARVIS. As capacidades descritas abaixo não representam ainda a arquitetura final da Antonella. Consulta o [plano mestre](docs/ANTONELLA_MASTER_ROADMAP.md), a [decisão de identidade](docs/adr/0001-antonella-project-identity.md) e o [inventário técnico](docs/current-state/legacy-inventory.md).
 
+## Antonella development baseline
+
+- Primary Python version: **3.11**.
+- Python 3.12 remains in the compatibility checks during stabilization.
+- The current lightweight checks do not require audio, camera, GUI, or Windows dependencies.
+
+```bash
+python -m compileall -q actions core dashboard memory plugins main.py ui.py setup.py
+python -m unittest discover -s tests -v
+```
+
+See [Python support](docs/current-state/python-support.md) for the exact scope of these checks.
+
 # ⚙️ MARK LI (51)
 ### The Ultimate Cross-Platform Personal AI Assistant — By FatihMakes
 
