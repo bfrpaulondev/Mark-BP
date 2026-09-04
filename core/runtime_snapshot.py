@@ -69,7 +69,7 @@ def build_runtime_snapshot(
             active_display = item.get("index")
             break
 
-    requested_monitor = agent.get("monitor_requested")
+    requested_monitor = agent.get("requested_monitor")
     resolved_monitor = agent.get("monitor_index")
     if requested_monitor not in {None, "", "active", "auto"}:
         display_label = f"Ecrã {resolved_monitor or requested_monitor}"
@@ -80,10 +80,17 @@ def build_runtime_snapshot(
     agent_label = _AGENT_LABELS.get(agent_state, agent_state.replace("_", " ").title())
     step = int(agent.get("step") or 0)
     calls = int(agent.get("model_calls") or 0)
+    batched = int(agent.get("batched_actions") or 0)
+    saved_calls = int(agent.get("saved_model_calls") or 0)
+
     if agent_state in {"observing", "planning", "executing", "awaiting_approval"}:
         agent_detail = f"passo {step} · {calls} IA"
+        if saved_calls:
+            agent_detail += f" · {saved_calls} chamada(s) poupada(s)"
     elif agent_state == "done" and agent.get("result"):
         agent_detail = str(agent.get("result"))[:80]
+        if saved_calls:
+            agent_detail += f" · {saved_calls} IA poupada(s)"
     elif agent_state == "failed" and agent.get("last_error"):
         agent_detail = str(agent.get("last_error"))[:80]
     else:
@@ -104,4 +111,6 @@ def build_runtime_snapshot(
         "agent_model": str(agent.get("model") or ""),
         "agent_step": step,
         "agent_model_calls": calls,
+        "agent_batched_actions": batched,
+        "agent_saved_model_calls": saved_calls,
     }
