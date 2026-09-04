@@ -28,14 +28,20 @@ class DisplaySelectionTests(unittest.TestCase):
     def test_all_hint_selects_virtual_desktop(self):
         self.assertEqual(select_monitor(MONITORS, hint="all"), MONITORS[0])
         self.assertEqual(normalize_monitor_hint("combined"), "all")
+        self.assertEqual(normalize_monitor_hint("todos os ecrãs"), "all")
 
     def test_numeric_and_natural_language_hints_select_requested_monitor(self):
         self.assertEqual(select_monitor(MONITORS, hint=2), MONITORS[2])
         self.assertEqual(select_monitor(MONITORS, hint="monitor 2"), MONITORS[2])
         self.assertEqual(select_monitor(MONITORS, hint="screen 3"), MONITORS[3])
+        self.assertEqual(select_monitor(MONITORS, hint="ecrã 2"), MONITORS[2])
+        self.assertEqual(select_monitor(MONITORS, hint="monitor dois"), MONITORS[2])
+        self.assertEqual(select_monitor(MONITORS, hint="segundo monitor"), MONITORS[2])
+        self.assertEqual(select_monitor(MONITORS, hint="terceiro ecrã"), MONITORS[3])
 
     def test_active_alias_uses_foreground_point(self):
         self.assertIsNone(normalize_monitor_hint("active"))
+        self.assertIsNone(normalize_monitor_hint("ativo"))
         self.assertEqual(
             select_monitor(MONITORS, point=(-900, 500), hint="active"),
             MONITORS[3],
