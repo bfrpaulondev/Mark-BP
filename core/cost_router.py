@@ -70,6 +70,7 @@ _BUDGETS = {
 }
 
 
+# -.-.-.-
 def normalize_cost_mode(value: str | CostMode | None) -> CostMode:
     if isinstance(value, CostMode):
         return value
@@ -80,10 +81,12 @@ def normalize_cost_mode(value: str | CostMode | None) -> CostMode:
         return CostMode.ECONOMY
 
 
+# -.-.-.-
 def budget_for_mode(value: str | CostMode | None) -> ExecutionBudget:
     return _BUDGETS[normalize_cost_mode(value)]
 
 
+# -.-.-.-
 def select_visual_route(
     config: Mapping[str, Any],
     *,
@@ -151,6 +154,7 @@ def select_visual_route(
     )
 
 
+# -.-.-.-
 def cost_class_for_tool(tool_name: str) -> str:
     normalized = str(tool_name or "").strip().lower()
 
@@ -165,13 +169,17 @@ def cost_class_for_tool(tool_name: str) -> str:
     }:
         return "local"
 
-    if normalized in {"browser_control", "file_processor"}:
+    if normalized in {
+        "browser_control",
+        "file_processor",
+        "windows_ui_automation",
+    }:
         return "structured"
 
-    if normalized in {"screen_process"}:
+    if normalized == "screen_process":
         return "vision"
 
-    if normalized in {"realtime_computer_use"}:
+    if normalized == "realtime_computer_use":
         return "computer_use"
 
     return "model"
