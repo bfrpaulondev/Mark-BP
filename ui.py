@@ -13,6 +13,9 @@ from pathlib import Path
 
 import psutil
 
+from config import get_config
+from config.settings import read_legacy_config, write_legacy_config
+
 if platform.system() == "Windows":
     _WIN_HIDE: dict = {"creationflags": subprocess.CREATE_NO_WINDOW}
 else:
@@ -44,11 +47,8 @@ API_FILE   = CONFIG_DIR / "api_keys.json"
 
 
 def _read_full_config() -> dict:
-    """Read api_keys.json config dict. Returns {} on any error."""
-    try:
-        return json.loads(API_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    """Read the central typed configuration through the compatibility dict."""
+    return get_config()
 
 
 _DEFAULT_W, _DEFAULT_H = 980, 700
@@ -2051,12 +2051,10 @@ class MainWindow(QMainWindow):
     def _cam_loop(self) -> None:
         try:
             import cv2
-            # Reuse camera index detected by screen_processor (cached in api_keys.json)
+            # Reuse the camera index detected by screen_processor.
             cam_idx = 0
             try:
-                import json as _j
-                cfg = _j.loads((CONFIG_DIR / "api_keys.json").read_text())
-                cam_idx = int(cfg.get("camera_index", 0))
+                cam_idx = int(get_config().get("camera_index", 0))
             except Exception:
                 pass
             try:
@@ -3237,12 +3235,12 @@ class MainWindow(QMainWindow):
                 color_changed = old["PRI"] != C.PRI
 
         try:
-            data = _read_full_config()
+            data = read_legacy_config(API_FILE)
             data["assistant_name"] = self._assistant_name
             data["user_name"] = user_name.strip()
             if ui_color:
                 data["ui_color"] = ui_color.strip().lower()
-            API_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+            write_legacy_config(data, API_FILE)
             self._log.append_log(f"SYS: Identity updated — {display}")
             if color_changed:
                 self._log.append_log(f"SYS: UI colour applied — {ui_color}")
@@ -3339,12 +3337,8 @@ class MainWindow(QMainWindow):
         self.hud.speaking = (state == "SPEAKING")
 
     def _check_config(self) -> bool:
-        if not API_FILE.exists(): return False
-        try:
-            d = json.loads(API_FILE.read_text(encoding="utf-8"))
-            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
-        except Exception:
-            return False
+        d = get_config()
+        return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
 
     def _show_setup(self):
         ov = SetupOverlay(self.centralWidget())

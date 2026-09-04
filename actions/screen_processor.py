@@ -35,6 +35,7 @@ except ImportError:
 
 from google import genai
 from google.genai import types as gtypes
+from config.settings import load_config, read_legacy_config, write_legacy_config
 
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -47,17 +48,14 @@ _CONFIG_PATH = _BASE / "config" / "api_keys.json"
 
 
 def _load_config() -> dict:
-    try:
-        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return load_config(_CONFIG_PATH)
 
 
 def _save_config_key(key: str, value) -> None:
     try:
-        cfg = _load_config()
+        cfg = read_legacy_config(_CONFIG_PATH)
         cfg[key] = value
-        _CONFIG_PATH.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
+        write_legacy_config(cfg, _CONFIG_PATH)
     except Exception as e:
         print(f"[Vision] ⚠️  Could not save config key '{key}': {e}")
 

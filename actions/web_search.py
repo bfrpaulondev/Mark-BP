@@ -5,6 +5,8 @@ import threading
 import time
 from pathlib import Path
 
+from config import get_gemini_key
+
 # ── Gemini grounding quota circuit breaker ────────────────────────────────────
 # The google_search grounding tool has its own small quota, separate from plain
 # generation.  Once it is spent every call returns 429 — so retrying it at the
@@ -74,8 +76,10 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    key = get_gemini_key()
+    if not key:
+        raise RuntimeError("gemini_api_key not found in configuration.")
+    return key
 
 
 def _gemini_search(query: str) -> str:

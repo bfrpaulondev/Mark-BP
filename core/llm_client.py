@@ -26,6 +26,8 @@ from typing import Callable, Generator
 
 import requests
 
+from config import get_config
+
 # Matches a sentence boundary: [.!?] followed by whitespace, or a blank line.
 # Avoids splitting on decimals (3.5) because those have no space after the dot.
 _SENT_END = re.compile(r'(?<=[.!?])\s+|(?<=\n)\s*\n')
@@ -53,10 +55,7 @@ def get_llm_provider() -> str:
 
 
 def _load_config() -> dict:
-    try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return get_config()
 
 
 def ensure_ollama_running(timeout: int = 15) -> bool:
