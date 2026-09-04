@@ -5,6 +5,8 @@ import re
 import time
 from pathlib import Path
 
+from config import get_gemini_key
+
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -19,8 +21,10 @@ GEMINI_MODEL       = "gemini-flash-latest"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    key = get_gemini_key()
+    if not key:
+        raise RuntimeError("gemini_api_key not found in configuration.")
+    return key
 
 
 def _get_gemini(model: str = GEMINI_MODEL):

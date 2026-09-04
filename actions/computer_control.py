@@ -15,6 +15,8 @@ import time
 import random
 from pathlib import Path
 
+from config import get_config
+
 try:
     import pyautogui
     pyautogui.FAILSAFE = True
@@ -40,10 +42,7 @@ _CONFIG_PATH  = _BASE / "config" / "api_keys.json"
 _MEMORY_PATH  = _BASE / "memory" / "long_term.json"
 
 def _load_config() -> dict:
-    try:
-        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return get_config()
 
 def _platform_os() -> str:
     return {"Windows": "windows", "Darwin": "mac", "Linux": "linux"}.get(

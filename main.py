@@ -42,6 +42,7 @@ from pathlib import Path
 import sounddevice as sd
 from google import genai
 from google.genai import types
+from config import get_gemini_key
 from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
@@ -89,8 +90,10 @@ RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    key = get_gemini_key()
+    if not key:
+        raise RuntimeError("gemini_api_key not found in configuration.")
+    return key
 
 
 def _load_system_prompt() -> str:

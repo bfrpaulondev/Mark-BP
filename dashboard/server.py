@@ -18,6 +18,8 @@ import string
 import time
 from pathlib import Path
 
+from config import get_gemini_key
+
 _DEPS_OK = False
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
@@ -59,12 +61,7 @@ def _make_uploads_dir() -> Path:
 UPLOADS_DIR = _make_uploads_dir()
 
 def _get_gemini_key() -> str | None:
-    try:
-        import json as _json
-        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
-            return _json.load(f).get("gemini_api_key")
-    except Exception:
-        return None
+    return get_gemini_key()
 
 _KEY_CHARS = [c for c in (string.ascii_uppercase + string.digits)
               if c not in ('O', 'I', 'L', '0', '1')]

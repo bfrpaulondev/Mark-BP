@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from config import is_windows, is_mac, is_linux
+from config import get_gemini_key, is_windows, is_mac, is_linux
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -19,8 +19,10 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    key = get_gemini_key()
+    if not key:
+        raise RuntimeError("gemini_api_key not found in configuration.")
+    return key
 
 _MONTH_MAP: dict[str, int] = {
 

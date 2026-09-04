@@ -28,6 +28,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from config import get_config
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 PLUGIN = {
@@ -72,12 +74,7 @@ _BRIGHT = (255, 235, 130)
 # ── config / camera (same pattern as calorie_counter) ───────────────────────
 
 def _config() -> dict:
-    try:
-        return json.loads(
-            (BASE_DIR / "config" / "api_keys.json").read_text(encoding="utf-8")
-        )
-    except Exception:
-        return {}
+    return get_config()
 
 
 def _open_camera():
