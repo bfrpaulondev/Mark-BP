@@ -4,19 +4,19 @@ Este é o caminho mais curto para validar a `main` atual sem instalações silen
 
 ## O que estás a testar
 
-O entrypoint canónico do teste desktop passa a ser `antonella.py`.
+O entrypoint canónico do desktop é `antonella.py`.
 
 Esta versão já inclui:
 
-- nova UI desktop Antonella, separada visualmente do HUD Mark/JARVIS;
+- UI Antonella redesenhada segundo a referência aprovada: fundo dark premium, métricas à esquerda, esfera neural de partículas no centro, `REGISTO` à direita, drop-zone e comando inferior;
 - identidade Antonella por defeito;
-- voz Gemini Live configurável, com `Kore` por defeito e estilo feminino/quente/natural;
+- voz Gemini Live configurável, com `Kore` por defeito e estilo feminino, quente e natural;
 - configuração tipada e variáveis `ANTONELLA_*`;
 - dependências bloqueadas e instalação reproduzível;
-- interrupção, mute, texto, áudio, câmara, anexos e painel de conteúdo;
+- interrupção, mute, texto, áudio, câmara, anexos e painel contextual;
 - motor realtime legado mantido por baixo como camada de compatibilidade durante a migração.
 
-Este teste ainda não valida memória Supabase, router multimodelo, nova arquitetura cloud ou integração MT5.
+Este teste ainda não valida memória Supabase, router multimodelo, arquitetura cloud final ou integração MT5.
 
 ## 1. Atualizar a main
 
@@ -57,13 +57,13 @@ A voz predefinida é:
 Kore
 ```
 
-Podes testar outra voz suportada sem alterar código, por exemplo:
+Podes escolher outra voz suportada sem alterar código:
 
 ```powershell
 $env:ANTONELLA_VOICE_NAME="Aoede"
 ```
 
-O estilo de entrega também é configurável:
+O estilo da voz também é configurável:
 
 ```powershell
 $env:ANTONELLA_VOICE_STYLE="feminine, warm, natural, calm and conversational"
@@ -91,18 +91,21 @@ uv run python antonella.py
 
 Valida estes fluxos:
 
-1. a janela nova Antonella abre sem crash;
-2. não aparece o HUD/arc-reactor visual herdado;
-3. o estado muda entre `A OUVIR`, `A PENSAR` e `A FALAR`;
-4. a sessão Gemini liga sem expor a chave nos logs;
-5. a voz ouvida é a voz configurada (`Kore` por defeito);
-6. uma pergunta simples por voz recebe resposta;
-7. `Esc` interrompe a resposta sem bloquear a UI;
-8. `F4` pausa e retoma o microfone;
-9. escrever no campo inferior envia um comando;
-10. pedir para abrir uma aplicação simples produz efeito real;
-11. anexar um ficheiro atualiza o cartão lateral e envia o contexto;
-12. fechar a aplicação termina o processo sem ficar preso em background.
+1. a nova janela Antonella abre sem crash;
+2. o cabeçalho mostra `ANTONELLA` e `Adaptive neural companion`;
+3. CPU, MEM, NET e CORE STATUS aparecem à esquerda;
+4. a esfera central é composta por partículas roxas e reage aos estados;
+5. os estados mudam entre `A ESCUTAR`, `A PENSAR` e `A RESPONDER`;
+6. `REGISTO` aparece à direita e recebe eventos/conversa;
+7. `Largar ficheiro` aceita clique e drag-and-drop;
+8. a sessão Gemini liga sem expor a chave nos logs;
+9. a voz ouvida é a voz configurada (`Kore` por defeito);
+10. uma pergunta simples por voz recebe resposta;
+11. `Esc` interrompe a resposta sem bloquear a UI;
+12. `F4` pausa e retoma o microfone;
+13. escrever em `Diz alguma coisa…` envia um comando;
+14. pedir para abrir uma aplicação simples produz efeito real;
+15. fechar a aplicação termina o processo sem ficar preso em background.
 
 ## Se falhar
 
