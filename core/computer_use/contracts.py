@@ -17,6 +17,8 @@ class FrameSnapshot:
     monitor_index: int
     change_score: float
     jpeg_bytes: bytes
+    capture_scope: str = "monitor"
+    pixel_savings: float = 0.0
 
     def to_screen_coordinates(self, x: int, y: int) -> tuple[int, int]:
         if self.image_width <= 0 or self.image_height <= 0:
@@ -87,6 +89,8 @@ class SessionState:
     visual_updates: int = 0
     batched_actions: int = 0
     saved_model_calls: int = 0
+    capture_scope: str = "monitor"
+    capture_savings_pct: int = 0
     last_action: str = ""
     last_error: str = ""
     result: str = ""
@@ -108,6 +112,8 @@ class SessionState:
             "visual_updates": self.visual_updates,
             "batched_actions": self.batched_actions,
             "saved_model_calls": self.saved_model_calls,
+            "capture_scope": self.capture_scope,
+            "capture_savings_pct": self.capture_savings_pct,
             "last_action": self.last_action,
             "last_error": self.last_error,
             "result": self.result,
