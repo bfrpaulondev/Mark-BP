@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from config import get_config, get_gemini_key
+from config import get_config, get_gemini_key, get_openai_key
 from core.installer import missing_for_config
 
 
@@ -17,6 +17,8 @@ SUPPORTED_PYTHON = {(3, 11), (3, 12)}
 PROMPT_PATH = BASE_DIR / "core" / "prompt.txt"
 ANTONELLA_ENTRYPOINT = BASE_DIR / "antonella.py"
 ANTONELLA_UI = BASE_DIR / "ui" / "__init__.py"
+COMPUTER_USE_PLUGIN = BASE_DIR / "plugins" / "realtime_computer_use.py"
+WINDOWS_UIA_PLUGIN = BASE_DIR / "plugins" / "windows_ui_automation.py"
 
 
 # -.-.-.-
@@ -58,6 +60,21 @@ def run_doctor(stream: TextIO = sys.stdout) -> int:
             "Gemini API key is missing. Set ANTONELLA_GEMINI_API_KEY or configure config/api_keys.json.",
         )
 
+    if get_openai_key():
+        mode = str(config.get("computer_use_cost_mode") or "economy")
+        fast_model = str(config.get("openai_model_fast") or "gpt-5.6-luna")
+        _write(
+            stream,
+            "PASS",
+            f"Optional OpenAI planner is configured (Computer Use mode={mode}, economy model={fast_model}).",
+        )
+    else:
+        _write(
+            stream,
+            "INFO",
+            "OpenAI planner is not configured; Realtime Computer Use will use the Gemini fallback.",
+        )
+
     if PROMPT_PATH.is_file():
         _write(stream, "PASS", "Antonella system prompt is present.")
     else:
@@ -70,6 +87,16 @@ def run_doctor(stream: TextIO = sys.stdout) -> int:
     else:
         failures += 1
         _write(stream, "FAIL", "Antonella desktop UI or antonella.py entrypoint is missing.")
+
+    if COMPUTER_USE_PLUGIN.is_file() and WINDOWS_UIA_PLUGIN.is_file():
+        _write(
+            stream,
+            "PASS",
+            "Cost-aware desktop stack is present (Windows UI Automation → Realtime Computer Use fallback).",
+        )
+    else:
+        failures += 1
+        _write(stream, "FAIL", "Cost-aware desktop plugins are incomplete.")
 
     missing = missing_for_config(config)
     if not missing:
