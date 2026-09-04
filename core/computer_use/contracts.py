@@ -76,6 +76,7 @@ class SessionState:
     state: str = "idle"
     objective: str = ""
     target_window: str = ""
+    requested_monitor: int | str | None = None
     cost_mode: str = "economy"
     provider: str = ""
     model: str = ""
@@ -94,6 +95,7 @@ class SessionState:
             "state": self.state,
             "objective": self.objective,
             "target_window": self.target_window,
+            "requested_monitor": self.requested_monitor,
             "cost_mode": self.cost_mode,
             "provider": self.provider,
             "model": self.model,
