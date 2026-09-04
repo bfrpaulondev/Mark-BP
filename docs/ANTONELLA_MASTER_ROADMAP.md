@@ -379,12 +379,12 @@ A interface atual será substituída, não apenas retocada.
 
 ## Fase 0 — Governança, licença e linha de base
 
-- [ ] **ANT-000 — Adotar oficialmente o nome Antonella.** Registar a decisão, remover novos usos de Mark/JARVIS e definir o nome técnico dos pacotes.
-- [ ] **ANT-001 — Inventariar todo o código e dependências herdadas.** Produzir mapa de módulos, responsabilidades, tamanhos, licenças e pontos de acoplamento.
+- [x] **ANT-000 — Adotar oficialmente o nome Antonella.** Registar a decisão, remover novos usos de Mark/JARVIS e definir o nome técnico dos pacotes. Evidência: [ADR-0001](adr/0001-antonella-project-identity.md).
+- [x] **ANT-001 — Inventariar todo o código e dependências herdadas.** Produzir mapa de módulos, responsabilidades, tamanhos, licenças e pontos de acoplamento. Evidência: [inventário técnico](current-state/legacy-inventory.md).
 - [ ] **ANT-002 — Auditar a licença original.** Determinar o que pode permanecer para uso pessoal e o que exigiria autorização ou reimplementação para uso comercial.
 - [ ] **ANT-003 — Criar estratégia clean-room.** Definir como substituir componentes herdados caso o projeto se torne comercial.
 - [ ] **ANT-004 — Tratar a chave privada existente no histórico.** Considerá-la comprometida, revogar certificados relacionados e decidir se o histórico deve ser reescrito com procedimento seguro.
-- [ ] **ANT-005 — Criar política de branches e PRs.** Proibir commits diretos na `main`, force push e merges sem testes.
+- [x] **ANT-005 — Criar política de branches e PRs.** Proibir commits diretos na `main`, force push e merges sem testes. Evidência: [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [ ] **ANT-006 — Definir convenções de commits, versões e changelog.** Adotar versionamento semântico e Conventional Commits.
 - [ ] **ANT-007 — Ativar GitHub Issues e preparar labels/milestones.** Transformar este roadmap em issues rastreáveis sem duplicação.
 - [ ] **ANT-008 — Criar ADRs iniciais.** Registar decisões sobre Supabase, FastAPI, workers, modelo de skills, cliente mínimo e UI.
