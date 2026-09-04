@@ -38,6 +38,7 @@ class AntonellaSettings(BaseSettings):
     )
 
     gemini_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = None
     os_system: Literal["windows", "mac", "linux"] = Field(default_factory=_platform_os)
     assistant_name: str = "Antonella"
     user_name: str = ""
@@ -49,6 +50,12 @@ class AntonellaSettings(BaseSettings):
     llm_url: str = "http://localhost:11434"
     llm_model: str = "llama3.2"
     llm_provider: str = "ollama"
+
+    model_provider_preference: Literal["auto", "openai", "gemini"] = "auto"
+    openai_model_fast: str = "gpt-5.6-luna"
+    openai_model_balanced: str = "gpt-5.6-terra"
+    openai_model_expert: str = "gpt-5.6-sol"
+    computer_use_cost_mode: Literal["economy", "balanced", "quality"] = "economy"
 
     # -.-.-.-
     @field_validator("os_system", mode="before")
@@ -74,6 +81,9 @@ class AntonellaSettings(BaseSettings):
         "llm_url",
         "llm_model",
         "llm_provider",
+        "openai_model_fast",
+        "openai_model_balanced",
+        "openai_model_expert",
         mode="before",
     )
     @classmethod
@@ -90,9 +100,6 @@ class AntonellaSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Environment variables deliberately override the legacy JSON values
-        # passed through init_settings. This makes migration incremental while
-        # keeping secrets out of the repository and out of automatic writes.
         return env_settings, init_settings, file_secret_settings
 
 
@@ -164,11 +171,19 @@ def load_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
             "llm_url": settings.llm_url,
             "llm_model": settings.llm_model,
             "llm_provider": settings.llm_provider,
+            "model_provider_preference": settings.model_provider_preference,
+            "openai_model_fast": settings.openai_model_fast,
+            "openai_model_balanced": settings.openai_model_balanced,
+            "openai_model_expert": settings.openai_model_expert,
+            "computer_use_cost_mode": settings.computer_use_cost_mode,
         }
     )
 
     if settings.gemini_api_key is not None:
         data["gemini_api_key"] = settings.gemini_api_key.get_secret_value()
+
+    if settings.openai_api_key is not None:
+        data["openai_api_key"] = settings.openai_api_key.get_secret_value()
 
     return data
 
@@ -176,4 +191,10 @@ def load_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
 # -.-.-.-
 def get_gemini_key(config_file: Path = CONFIG_FILE) -> str | None:
     secret = load_settings(config_file).gemini_api_key
+    return secret.get_secret_value() if secret is not None else None
+
+
+# -.-.-.-
+def get_openai_key(config_file: Path = CONFIG_FILE) -> str | None:
+    secret = load_settings(config_file).openai_api_key
     return secret.get_secret_value() if secret is not None else None
