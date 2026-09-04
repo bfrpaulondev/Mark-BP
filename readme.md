@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Transição para Antonella:** a implementação atual continua a ser o protótipo herdado Mark/JARVIS. As capacidades descritas abaixo não representam ainda a arquitetura final da Antonella. Consulta o [plano mestre](docs/ANTONELLA_MASTER_ROADMAP.md), a [decisão de identidade](docs/adr/0001-antonella-project-identity.md) e o [inventário técnico](docs/current-state/legacy-inventory.md).
+
 # ⚙️ MARK LI (51)
 ### The Ultimate Cross-Platform Personal AI Assistant — By FatihMakes
 
