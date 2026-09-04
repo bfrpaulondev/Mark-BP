@@ -10,8 +10,8 @@
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | Redesign desktop + voz feminina — pronta para integração |
-| Pull requests abertas | Nenhuma antes da PR desta entrega |
+| Tarefa ativa | Nenhuma — redesign desktop e voz feminina integrados |
+| Pull requests abertas | Nenhuma |
 | Issues abertas | Nenhuma |
 | Próximo teste | Windows real: `uv run python scripts/doctor.py` → `uv run python antonella.py` |
 | Próxima tarefa após smoke | Continuar `ANT-015` e iniciar `ANT-016` |
@@ -38,6 +38,7 @@
 | PR #9 | Primeiro corte de `ANT-015` | Logging JSON, correlation id e redação de dados sensíveis |
 | PR #10 | Test readiness | `doctor`, documentação e smoke test reproduzível |
 | PR #11 | Correção doctor | Execução direta de `scripts/doctor.py` corrigida e coberta por regressão |
+| PR #12 | UI/UX + voz | Referência visual Antonella, orb neural optimizado, voz feminina configurável e novo entrypoint |
 
 ## Entrega atual — identidade visual Antonella + voz feminina
 
@@ -50,7 +51,7 @@ A entrega substitui o aspecto herdado do Mark/JARVIS no teste desktop sem reescr
 - cabeçalho `ANTONELLA` + `Adaptive neural companion`;
 - relógio e data em pt-PT;
 - CPU, MEM, NET e CORE STATUS em cartões à esquerda;
-- esfera neural central renderizada com centenas de partículas e animação por estado;
+- esfera neural central renderizada com partículas pré-calculadas e animação optimizada a ~30 FPS;
 - estados visuais `A ESCUTAR`, `A PENSAR`, `A EXECUTAR`, `A RESPONDER` e mute;
 - `REGISTO` à direita com sanitização do branding herdado;
 - drag-and-drop/click para anexar ficheiro;
