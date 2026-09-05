@@ -6,6 +6,8 @@ from datetime import datetime
 
 from config import get_config
 from core.local_command_router import execute_local_intent, parse_local_text_command
+from core.tool_verification_policy import requires_postcondition
+from core.verifier import verify_tool_result
 from google.genai import types
 from main import (
     TOOL_DECLARATIONS,
@@ -121,6 +123,40 @@ class AntonellaLive(JarvisLive):
             daemon=True,
             name=f"antonella-local-{intent.kind}",
         ).start()
+
+    # -.-.-.-
+    async def _execute_tool(self, fc) -> types.FunctionResponse:
+        """Attach fail-closed execution evidence to side-effecting tool results."""
+        base_response = await super()._execute_tool(fc)
+        name = str(fc.name or "")
+        args = dict(fc.args or {})
+        if not requires_postcondition(name, args):
+            return base_response
+
+        try:
+            payload = dict(getattr(base_response, "response", None) or {})
+        except Exception:
+            return base_response
+
+        raw_result = payload.get("result")
+        action_suffix = str(args.get("action") or "").strip()
+        action_name = f"{name}.{action_suffix}" if action_suffix else name
+        execution = verify_tool_result(raw_result, action=action_name)
+        payload["execution"] = execution.to_dict()
+        if not execution.can_claim_success:
+            payload["verification_note"] = (
+                "Do not claim this effect succeeded unless execution.can_claim_success is true."
+            )
+
+        self.ui.write_log(
+            "SYS: verify · "
+            f"{action_name} · delivered={execution.delivered} · verified={execution.verified}"
+        )
+        return types.FunctionResponse(
+            id=fc.id,
+            name=name,
+            response=payload,
+        )
 
     # -.-.-.-
     def speak_error(self, tool_name: str, error: str) -> None:
