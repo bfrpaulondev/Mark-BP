@@ -22,8 +22,9 @@ PLUGIN = {
         "Verified zero/low-token control for the user's real Windows desktop. Use this for already-open "
         "real browser windows/tabs and for mouse movement that must be confirmed. It can list/focus "
         "browser windows, list tabs, switch tabs by index/title/URL, inspect the current tab and move "
-        "the cursor with explicit verification. Do not create a separate Playwright browser session just "
-        "to navigate the user's existing browser. If verified=false, never tell the user the action succeeded."
+        "the cursor with explicit verification. Every effect result exposes a verified boolean. Do not "
+        "create a separate Playwright browser session just to navigate the user's existing browser. "
+        "If verified=false, never tell the user the action succeeded."
     ),
     "parameters": {
         "type": "OBJECT",
