@@ -9,6 +9,7 @@ from typing import Any
 
 from core.execution_engine import ExecutionEngine
 from core.execution_result import ExecutionResult
+from core.policy_engine import PolicyDecision, PolicyEffect, PolicyEngine
 from core.tool_router import ToolRouter
 
 
@@ -53,6 +54,8 @@ class ToolOrchestrationOutcome:
     events: tuple[OrchestrationEvent, ...]
     duration_ms: int
     route_tier: str = "legacy"
+    policy_effect: str = "write"
+    policy_rule: str = ""
 
     @property
     def can_claim_success(self) -> bool:
@@ -65,16 +68,16 @@ class ToolOrchestrationOutcome:
 
 
 class AgentOrchestrator:
-    """Incremental orchestration shell around the existing Antonella tool runtime.
+    """Provider-neutral execution lifecycle for Antonella tool calls.
 
-    This class deliberately does not implement routing, authorization policy or provider
-    selection yet. Those responsibilities remain legacy/pass-through until ANT-260–263.
-    Its job in ANT-259 is to own the execution lifecycle and make the boundaries explicit:
+    ANT-259 established the lifecycle and ANT-260 separated routing/dispatch. ANT-261
+    inserts a deterministic Policy Engine before any observation or side effect:
 
-    route -> policy boundary -> observe -> execute -> observe -> verify -> finish
+    route -> policy -> observe -> execute -> observe -> verify -> finish
 
-    The injected callbacks keep this module provider-neutral and preserve the current
-    runtime while later tasks replace each boundary independently.
+    The policy gate never trusts model-supplied approval flags. Action-bound human approval
+    tokens are intentionally deferred to ANT-262; until then approval-required operations
+    stop safely before execution.
     """
 
     def __init__(
@@ -86,6 +89,7 @@ class AgentOrchestrator:
         event_sink: Callable[[OrchestrationEvent], Any] | None = None,
         tool_router: ToolRouter | None = None,
         execution_engine: ExecutionEngine | None = None,
+        policy_engine: PolicyEngine | None = None,
     ) -> None:
         self._requires_postcondition = requires_postcondition
         self._capture_postcondition_state = capture_postcondition_state
@@ -93,6 +97,7 @@ class AgentOrchestrator:
         self._event_sink = event_sink
         self._tool_router = tool_router or ToolRouter()
         self._execution_engine = execution_engine or ExecutionEngine()
+        self._policy_engine = policy_engine or PolicyEngine()
 
     # -.-.-.-
     async def run_tool(
@@ -122,16 +127,25 @@ class AgentOrchestrator:
             },
         )
 
-        # ANT-261 will replace this explicit boundary with the central Policy Engine.
-        # No new authorization decision is made by ANT-259; legacy behaviour is preserved.
+        decision = self._policy_engine.evaluate(name, params)
         self._emit(
             events,
             correlation_id,
             AgentStage.POLICY,
             name,
-            detail="legacy_policy_passthrough",
-            metadata={"central_policy_active": False},
+            detail="central_policy_decision",
+            metadata=decision.safe_metadata(),
         )
+
+        if decision.blocks_execution:
+            return self._policy_stopped_outcome(
+                name=name,
+                route_tier=route.tier.value,
+                decision=decision,
+                correlation_id=correlation_id,
+                started=started,
+                events=events,
+            )
 
         needs_postcondition = bool(self._requires_postcondition(name, params))
         before_state: Mapping[str, Any] | None = None
@@ -155,6 +169,7 @@ class AgentOrchestrator:
             metadata={
                 "requires_postcondition": needs_postcondition,
                 "route_tier": route.tier.value,
+                "policy_effect": decision.effect.value,
             },
         )
 
@@ -205,6 +220,7 @@ class AgentOrchestrator:
                     "Do not claim this effect succeeded unless execution.can_claim_success is true."
                 )
 
+        payload["policy"] = decision.safe_metadata()
         duration_ms = max(0, round((time.monotonic() - started) * 1000))
         self._emit(
             events,
@@ -216,6 +232,7 @@ class AgentOrchestrator:
                 "duration_ms": duration_ms,
                 "verified": execution.verified if execution is not None else None,
                 "can_claim_success": execution.can_claim_success if execution is not None else None,
+                "policy_effect": decision.effect.value,
             },
         )
 
@@ -228,6 +245,75 @@ class AgentOrchestrator:
             events=tuple(events),
             duration_ms=duration_ms,
             route_tier=route.tier.value,
+            policy_effect=decision.effect.value,
+            policy_rule=decision.rule_id,
+        )
+
+    # -.-.-.-
+    def _policy_stopped_outcome(
+        self,
+        *,
+        name: str,
+        route_tier: str,
+        decision: PolicyDecision,
+        correlation_id: str,
+        started: float,
+        events: list[OrchestrationEvent],
+    ) -> ToolOrchestrationOutcome:
+        if decision.requires_approval:
+            error = "Explicit human approval is required before this action can execute."
+            execution = ExecutionResult.failure(
+                action=name,
+                error=error,
+                risk=decision.effect.value,
+                requires_approval=True,
+                correlation_id=correlation_id,
+            )
+            detail = "policy_waiting_for_approval"
+        else:
+            error = decision.reason or "This action is blocked by local policy."
+            execution = ExecutionResult.failure(
+                action=name,
+                error=error,
+                risk=PolicyEffect.BLOCKED.value,
+                requires_approval=False,
+                correlation_id=correlation_id,
+            )
+            detail = "policy_blocked_execution"
+
+        payload = {
+            "result": error,
+            "execution": execution.to_dict(),
+            "policy": decision.safe_metadata(),
+            "verification_note": (
+                "Do not claim this effect succeeded unless execution.can_claim_success is true."
+            ),
+        }
+        duration_ms = max(0, round((time.monotonic() - started) * 1000))
+        self._emit(
+            events,
+            correlation_id,
+            AgentStage.FINISH,
+            name,
+            detail=detail,
+            metadata={
+                "duration_ms": duration_ms,
+                "policy_effect": decision.effect.value,
+                "requires_approval": decision.requires_approval,
+                "executed": False,
+            },
+        )
+        return ToolOrchestrationOutcome(
+            correlation_id=correlation_id,
+            tool_name=name,
+            raw_response=None,
+            response_payload=payload,
+            execution=execution,
+            events=tuple(events),
+            duration_ms=duration_ms,
+            route_tier=route_tier,
+            policy_effect=decision.effect.value,
+            policy_rule=decision.rule_id,
         )
 
     # -.-.-.-
