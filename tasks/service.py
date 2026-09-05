@@ -54,8 +54,11 @@ class TaskService:
 
     # -.-.-.-
     def approve(self, task_id: str, *, owner_id: str) -> Task:
-        """F13: approval is explicit; the approved state does not linger —
-        the runner consumes it in the same cycle it is granted."""
+        """F13/T3: approval is explicit and does not linger — the runner
+        consumes the canonical one-use grant in the same cycle. The grant
+        itself lives in the HumanApprovalManager (in-memory by design):
+        after a restart it cannot be proven and the dangerous step
+        re-requests approval instead of running."""
         task = self._require(task_id, owner_id)
         if task.state is not TaskState.AWAITING_APPROVAL:
             raise ValueError(f"task is not awaiting approval (state={task.state.value})")
@@ -108,11 +111,13 @@ class TaskService:
         state_verifier: StateVerifier,
         runner: TaskRunner,
     ) -> list[Task]:
-        """F14: after a crash, verify external reality per pending step.
+        """F14/T4/T5: after a crash, verify external reality per pending step.
 
-        The verifier decides whether a pending step's effect actually
-        happened; verified steps are marked done (never re-executed),
-        everything else continues through the normal runner path.
+        Verdicts (``state_verifier`` returns ``{"completed": True/False/None}``):
+        - True → the effect already happened: mark done, never re-execute;
+        - False → no effect happened: safe steps may re-run via the runner;
+        - None (unknown/unverifiable): dangerous steps go to
+          ``needs_review`` — they are NEVER re-executed on doubt.
         """
         reconciled: list[Task] = []
         for task in self._store.list_tasks(owner_id, non_terminal_only=True):
@@ -120,11 +125,16 @@ class TaskService:
                 if step.state != "pending":
                     continue
                 verdict = state_verifier(step) or {}
-                if verdict.get("completed"):
+                completed = verdict.get("completed")
+                if completed is True:
                     step.state = "done"
                     step.outcome = {k: v for k, v in verdict.items() if k != "completed"}
                     if step.idempotency_key not in task.completed_keys:
                         task.completed_keys.append(step.idempotency_key)
+                elif completed is None and step.risk == "dangerous":
+                    # T4/T5: an unverified dangerous effect is never replayed
+                    # on doubt — it requires human review.
+                    step.state = "needs_review"
             if task.state is TaskState.RUNNING:
                 task.state = TaskState.RECOVERING
             task.updated_at = self._clock()

@@ -37,7 +37,11 @@ class TaskStep:
     idempotency_key: str
     risk: str = "low"  # safe | medium | dangerous — dangerous never auto-retries (F8)
     max_retries: int = 2
-    state: str = "pending"  # pending | done | failed | skipped
+    # T2: delivery ≠ verification. A step that carries a verifiable effect
+    # only becomes "done" with delivered AND verified; otherwise it parks
+    # in awaiting_verification / awaiting_approval / needs_review.
+    requires_verification: bool = False
+    state: str = "pending"  # pending | done | failed | awaiting_verification | awaiting_approval | needs_review | cancelled
     outcome: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -47,6 +51,7 @@ class TaskStep:
             "idempotency_key": self.idempotency_key,
             "risk": self.risk,
             "max_retries": self.max_retries,
+            "requires_verification": self.requires_verification,
             "state": self.state,
             "outcome": dict(self.outcome),
         }
@@ -59,6 +64,7 @@ class TaskStep:
             idempotency_key=str(data["idempotency_key"]),
             risk=str(data.get("risk") or "low"),
             max_retries=int(data.get("max_retries") or 2),
+            requires_verification=bool(data.get("requires_verification") or False),
             state=str(data.get("state") or "pending"),
             outcome=dict(data.get("outcome") or {}),
         )
@@ -76,6 +82,7 @@ class Task:
     updated_at: float = 0.0
     error: str | None = None
     completed_keys: list[str] = field(default_factory=list)  # F4/F5 checkpoint
+    approval_request_id: str | None = None  # T3: bound to the canonical approval manager
 
     # -.-.-.-
     @property
@@ -99,6 +106,7 @@ class Task:
             "updated_at": self.updated_at,
             "error": self.error,
             "completed_keys": list(self.completed_keys),
+            "approval_request_id": self.approval_request_id,
         }
 
     @classmethod
@@ -114,6 +122,7 @@ class Task:
             updated_at=float(data.get("updated_at") or 0.0),
             error=data.get("error"),
             completed_keys=list(data.get("completed_keys") or []),
+            approval_request_id=data.get("approval_request_id"),
         )
 
 

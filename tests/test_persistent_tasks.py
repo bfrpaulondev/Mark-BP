@@ -23,9 +23,11 @@ def _task_service(steps_spec: list[tuple[str, str]] = None, *, requires_approval
 
 
 def _ok_executor(log: list[str]):
+    """Non-verifiable steps: plain ok. Verifiable outcomes must carry
+    delivered AND verified (T1)."""
     def executor(step):
         log.append(step.idempotency_key)
-        return {"ok": True, "delivered": True}
+        return {"ok": True}
 
     return executor
 
@@ -122,7 +124,9 @@ class CancelPauseRetryTests(unittest.TestCase):
         self.assertEqual(result.state, TaskState.CANCELLED)
         self.assertEqual(log, [])
 
-    def test_dangerous_steps_never_auto_retry(self):
+    def test_dangerous_steps_require_canonical_grant_and_never_auto_retry(self):
+        from core.human_approval import HumanApprovalManager
+
         service, store, task = _task_service([("del", "dangerous")])
         attempts: list[int] = []
 
@@ -130,10 +134,55 @@ class CancelPauseRetryTests(unittest.TestCase):
             attempts.append(1)
             return {"ok": False, "error_type": "transient"}
 
-        runner = TaskRunner(store=store, executor=executor)
+        manager = HumanApprovalManager(clock=lambda: 1000.0)
+        runner = TaskRunner(store=store, executor=executor, approval_manager=manager, clock=lambda: 1000.0)
+
+        # Fail-closed: no grant -> the task parks awaiting approval.
         result = runner.run(task)
+        self.assertEqual(result.state, TaskState.AWAITING_APPROVAL)
+        self.assertEqual(attempts, [])
+
+        # Human approves via the canonical manager (request -> one-use
+        # grant); the task transitions and the runner consumes the grant
+        # exactly once. The transient failure still never auto-retries.
+        self.assertTrue(manager.approve(result.approval_request_id))
+        approved = service.approve(task.id, owner_id="u1")
+        result = runner.run(approved)
         self.assertEqual(result.state, TaskState.FAILED)
         self.assertEqual(len(attempts), 1)
+
+    def test_grant_dies_after_restart_and_re_requests(self):
+        from core.human_approval import HumanApprovalManager
+
+        service, store, task = _task_service([("del", "dangerous")])
+        attempts: list[int] = []
+
+        def executor(step):
+            attempts.append(1)
+            return {"ok": True}
+
+        manager = HumanApprovalManager(clock=lambda: 1000.0)
+        runner = TaskRunner(store=store, executor=executor, approval_manager=manager, clock=lambda: 1000.0)
+        parked = runner.run(task)
+        manager.approve(parked.approval_request_id)
+        service.approve(task.id, owner_id="u1")
+
+        # Restart: a fresh manager has no provable grant -> parks again.
+        snapshots = store.to_dicts()
+        store2 = InMemoryTaskStore()
+        store2.load_dicts(snapshots)
+        fresh_manager = HumanApprovalManager(clock=lambda: 2000.0)
+        runner2 = TaskRunner(store=store2, executor=executor, approval_manager=fresh_manager, clock=lambda: 2000.0)
+        rehydrated = store2.get_task(task.id, "u1")
+        result = runner2.run(rehydrated)
+        self.assertEqual(result.state, TaskState.AWAITING_APPROVAL)
+        self.assertEqual(attempts, [])  # never ran on trust
+
+    def test_dangerous_step_without_manager_parks_fail_closed(self):
+        service, store, task = _task_service([("del", "dangerous")])
+        runner = TaskRunner(store=store, executor=_ok_executor([]))
+        result = runner.run(task)
+        self.assertEqual(result.state, TaskState.AWAITING_APPROVAL)
 
     def test_safe_transient_step_retries_bounded(self):
         service, store, task = _task_service([("a", "safe")])
@@ -213,6 +262,91 @@ class IsolationTests(unittest.TestCase):
         runner.run(task)
         self.assertIsNone(store.get_task(task.id, owner_id="u2"))
         self.assertEqual(store.list_tasks(owner_id="u2"), [])
+
+
+class VerificationContractTests(unittest.TestCase):
+    """T1/T2 — delivery is never verification."""
+
+    def _task_with(self, steps_spec):
+        store = InMemoryTaskStore()
+        service = TaskService(store=store, clock=lambda: 1000.0)
+        steps = [TaskStep(name=n, action={}, idempotency_key=f"key-{n}", **kw) for n, kw in steps_spec]
+        task = service.create(owner_id="u1", title="T", steps=steps)
+        return service, store, task
+
+    def test_plain_ok_step_still_completes(self):
+        service, store, task = self._task_with([("query", {})])
+        runner = TaskRunner(store=store, executor=lambda s: {"ok": True})
+        self.assertEqual(runner.run(task).state, TaskState.COMPLETED)
+
+    def test_delivered_unverified_never_becomes_done(self):
+        from core.execution_result import ExecutionResult
+
+        service, store, task = self._task_with([("efeito", {"requires_verification": True})])
+        runner = TaskRunner(
+            store=store,
+            executor=lambda s: ExecutionResult.unverified_delivery(s.name, message="não confirmei"),
+        )
+        result = runner.run(task)
+        self.assertEqual(result.state, TaskState.RECOVERING)
+        self.assertEqual(result.steps[0].state, "awaiting_verification")
+
+    def test_verified_execution_result_completes(self):
+        from core.execution_result import ExecutionResult
+
+        service, store, task = self._task_with([("efeito", {"requires_verification": True})])
+        runner = TaskRunner(
+            store=store,
+            executor=lambda s: ExecutionResult.verified_success(s.name),
+        )
+        self.assertEqual(runner.run(task).state, TaskState.COMPLETED)
+
+    def test_parked_verification_blocks_completion(self):
+        from core.execution_result import ExecutionResult
+
+        service, store, task = self._task_with(
+            [("efeito", {"requires_verification": True}), ("seguinte", {})]
+        )
+        runner = TaskRunner(
+            store=store,
+            executor=lambda s: (
+                ExecutionResult.unverified_delivery(s.name) if s.name == "efeito" else {"ok": True}
+            ),
+        )
+        result = runner.run(task)
+        self.assertEqual(result.state, TaskState.RECOVERING)
+        self.assertEqual(result.steps[1].state, "pending")  # never ran past the unverified effect
+
+
+class ReconcileSafetyTests(unittest.TestCase):
+    """T4/T5 — unknown dangerous effects are never replayed on doubt."""
+
+    def test_unknown_dangerous_effect_needs_review(self):
+        service, store, task = _task_service([("del", "dangerous"), ("a", "safe")])
+        log: list[str] = []
+        runner = TaskRunner(store=store, executor=_ok_executor(log), clock=lambda: 1000.0)
+
+        def verifier(step):
+            return {"completed": None}  # unknowable
+
+        reconciled = service.reconcile_after_restart(owner_id="u1", state_verifier=verifier, runner=runner)
+        result = reconciled[0]
+        self.assertEqual(result.steps[0].state, "needs_review")
+        self.assertEqual(result.state, TaskState.RECOVERING)
+        self.assertEqual(log, ["key-a"])  # safe step ran; dangerous never did
+
+    def test_crash_after_effect_before_checkpoint_is_reconciled(self):
+        service, store, task = _task_service([("efeito", {"requires_verification": False, "risk": "safe"})])
+        log: list[str] = []
+        runner = TaskRunner(store=store, executor=_ok_executor(log), clock=lambda: 1000.0)
+
+        # The effect happened externally but the checkpoint never persisted.
+        def verifier(step):
+            return {"completed": True, "ok": True}
+
+        reconciled = service.reconcile_after_restart(owner_id="u1", state_verifier=verifier, runner=runner)
+        self.assertEqual(reconciled[0].state, TaskState.COMPLETED)
+        self.assertEqual(log, [])  # effect NOT repeated
 
 
 if __name__ == "__main__":
