@@ -140,6 +140,9 @@ def extract_openai_usage(payload: dict[str, Any]) -> ProviderUsage:
         cached_input_tokens=_safe_count(input_details.get("cached_tokens")),
         reasoning_tokens=_safe_count(output_details.get("reasoning_tokens")),
         total_tokens=total_tokens,
+        # Responses API reports reasoning_tokens as a breakdown of output_tokens,
+        # so adding it again would double count the priced output.
+        billable_output_tokens=output_tokens,
     )
 
 
