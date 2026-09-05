@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 import time
 from collections.abc import Mapping
@@ -117,21 +119,34 @@ class _ProviderHealth:
 
 
 class ProviderExhaustedError(RuntimeError):
-    """Raised after all configured providers fail without echoing prompt/content."""
+    """All eligible providers failed, without echoing prompt/image/credentials."""
 
-    def __init__(self, attempts: tuple[ProviderAttempt, ...]):
+    def __init__(
+        self,
+        attempts: tuple[ProviderAttempt, ...],
+        *,
+        eligible_providers: tuple[str, ...] = (),
+    ):
         self.attempts = attempts
-        providers = ", ".join(dict.fromkeys(item.provider for item in attempts)) or "none"
-        super().__init__(f"No configured AI provider completed the request. Tried: {providers}.")
+        self.eligible_providers = eligible_providers
+        providers = eligible_providers or tuple(
+            dict.fromkeys(item.provider for item in attempts)
+        )
+        provider_text = ", ".join(providers) or "none configured"
+        super().__init__(
+            "No configured AI provider completed the request. "
+            f"Eligible providers: {provider_text}."
+        )
 
 
 class ProviderRouter:
     """Provider-neutral specialist text/vision router.
 
-    This router does not replace Gemini Live realtime audio. It provides a bounded path for
-    specialist text/vision work with deterministic role routing, short retry, provider
-    fallback and an in-memory circuit breaker. Raw prompts, image bytes and credentials are
-    never stored in route health or public metadata.
+    Gemini Live continues to own realtime speech. This router handles bounded
+    specialist text/vision calls with deterministic role selection, retry for
+    transient provider failures, cross-provider fallback and an in-memory
+    circuit breaker. It never stores raw prompts, images or credentials in
+    health/telemetry metadata.
     """
 
     def __init__(
@@ -148,7 +163,10 @@ class ProviderRouter:
         self._config = dict(config or {})
         self._max_attempts = max(1, min(3, int(max_attempts_per_provider)))
         self._breaker_threshold = max(1, min(10, int(breaker_threshold)))
-        self._breaker_cooldown = max(1.0, min(600.0, float(breaker_cooldown_seconds)))
+        self._breaker_cooldown = max(
+            1.0,
+            min(600.0, float(breaker_cooldown_seconds)),
+        )
         self._clock = clock
         self._sleeper = sleeper
         self._lock = threading.RLock()
@@ -163,7 +181,11 @@ class ProviderRouter:
             normalized: dict[ProviderName, ProviderAdapter] = {}
             for key, adapter in adapters.items():
                 try:
-                    provider = key if isinstance(key, ProviderName) else ProviderName(str(key).strip().lower())
+                    provider = (
+                        key
+                        if isinstance(key, ProviderName)
+                        else ProviderName(str(key).strip().lower())
+                    )
                 except ValueError:
                     continue
                 normalized[provider] = adapter
@@ -191,11 +213,16 @@ class ProviderRouter:
         selected_role = self._normalize_role(role)
         selected_capability = self._normalize_capability(capability)
         preferred = str(
-            preference if preference is not None else self._config.get("model_provider_preference") or "auto"
+            preference
+            if preference is not None
+            else self._config.get("model_provider_preference") or "auto"
         ).strip().lower()
         if preferred not in {"auto", "openai", "gemini"}:
             preferred = "auto"
 
+        # An explicit setting means "prefer", not "lock"; the existing UI uses
+        # that wording. Fallback therefore remains available when both providers
+        # are configured.
         if preferred == "openai":
             order = (ProviderName.OPENAI, ProviderName.GEMINI)
         elif preferred == "gemini":
@@ -205,18 +232,15 @@ class ProviderRouter:
         else:
             order = (ProviderName.OPENAI, ProviderName.GEMINI)
 
-        candidates: list[ProviderCandidate] = []
-        for provider in order:
-            if provider not in self._adapters:
-                continue
-            candidates.append(
-                self._candidate_for(
-                    provider=provider,
-                    role=selected_role,
-                    capability=selected_capability,
-                )
+        return tuple(
+            self._candidate_for(
+                provider=provider,
+                role=selected_role,
+                capability=selected_capability,
             )
-        return tuple(candidates)
+            for provider in order
+            if provider in self._adapters
+        )
 
     # -.-.-.-
     def generate_text(
@@ -226,11 +250,14 @@ class ProviderRouter:
         role: str | ProviderRole | None = None,
         preference: str | None = None,
     ) -> ProviderResult:
+        prompt = str(prompt or "").strip()
+        if not prompt:
+            raise ValueError("Provider text request requires a prompt.")
         return self._execute(
             capability=ProviderCapability.TEXT,
             role=self._normalize_role(role),
             preference=preference,
-            prompt=str(prompt or ""),
+            prompt=prompt,
             image_bytes=None,
             mime_type="",
             detail="low",
@@ -247,12 +274,18 @@ class ProviderRouter:
         mime_type: str = "image/jpeg",
         detail: str = "low",
     ) -> ProviderResult:
+        prompt = str(prompt or "").strip()
+        image = bytes(image_bytes or b"")
+        if not prompt:
+            raise ValueError("Provider vision request requires a prompt.")
+        if not image:
+            raise ValueError("Provider vision request requires image bytes.")
         return self._execute(
             capability=ProviderCapability.VISION,
             role=self._normalize_role(role or ProviderRole.VISION),
             preference=preference,
-            prompt=str(prompt or ""),
-            image_bytes=bytes(image_bytes),
+            prompt=prompt,
+            image_bytes=image,
             mime_type=str(mime_type or "image/jpeg"),
             detail=str(detail or "low"),
         )
@@ -274,14 +307,13 @@ class ProviderRouter:
             capability=capability,
             preference=preference,
         )
+        eligible = tuple(item.provider.value for item in candidates)
         if not candidates:
-            raise ProviderExhaustedError(())
+            raise ProviderExhaustedError((), eligible_providers=eligible)
 
         attempts: list[ProviderAttempt] = []
-        fallback_index = 0
         for candidate_index, candidate in enumerate(candidates):
             if not self._provider_available(candidate.provider):
-                fallback_index += 1
                 continue
 
             adapter = self._adapters[candidate.provider]
@@ -291,7 +323,7 @@ class ProviderRouter:
                     if capability == ProviderCapability.VISION:
                         if image_bytes is None:
                             raise ValueError("Vision request requires image bytes.")
-                        text = adapter.analyze_image(
+                        raw_text = adapter.analyze_image(
                             model=candidate.model,
                             prompt=prompt,
                             image_bytes=image_bytes,
@@ -300,11 +332,16 @@ class ProviderRouter:
                             reasoning_effort=candidate.reasoning_effort,
                         )
                     else:
-                        text = adapter.generate_text(
+                        raw_text = adapter.generate_text(
                             model=candidate.model,
                             prompt=prompt,
                             reasoning_effort=candidate.reasoning_effort,
                         )
+
+                    bounded = str(raw_text or "").strip()[: candidate.max_output_chars]
+                    if not bounded:
+                        raise RuntimeError("Provider response contained no usable text.")
+
                     latency = max(0, round((self._clock() - started) * 1000))
                     attempts.append(
                         ProviderAttempt(
@@ -316,9 +353,6 @@ class ProviderRouter:
                         )
                     )
                     self._record_success(candidate.provider)
-                    bounded = str(text or "").strip()[: candidate.max_output_chars]
-                    if not bounded:
-                        raise RuntimeError("Provider response contained no usable text.")
                     return ProviderResult(
                         text=bounded,
                         provider=candidate.provider.value,
@@ -348,11 +382,14 @@ class ProviderRouter:
 
                     if not retryable or attempt_number >= self._max_attempts:
                         break
-                    self._sleeper(min(0.75, 0.15 * (2 ** (attempt_number - 1))))
+                    self._sleeper(
+                        min(0.75, 0.15 * (2 ** (attempt_number - 1)))
+                    )
 
-            fallback_index += 1
-
-        raise ProviderExhaustedError(tuple(attempts))
+        raise ProviderExhaustedError(
+            tuple(attempts),
+            eligible_providers=eligible,
+        )
 
     # -.-.-.-
     def health_snapshot(self) -> dict[str, dict[str, Any]]:
@@ -363,7 +400,10 @@ class ProviderRouter:
                 output[provider.value] = {
                     "configured": provider in self._adapters,
                     "circuit_open": health.open_until > now,
-                    "retry_after_seconds": max(0, round(health.open_until - now, 3)),
+                    "retry_after_seconds": max(
+                        0,
+                        round(health.open_until - now, 3),
+                    ),
                     "consecutive_failures": health.consecutive_failures,
                     "last_error_class": health.last_error_class,
                 }
@@ -371,7 +411,11 @@ class ProviderRouter:
 
     # -.-.-.-
     def reset_provider(self, provider: str | ProviderName) -> None:
-        selected = provider if isinstance(provider, ProviderName) else ProviderName(str(provider).strip().lower())
+        selected = (
+            provider
+            if isinstance(provider, ProviderName)
+            else ProviderName(str(provider).strip().lower())
+        )
         with self._lock:
             self._health[selected] = _ProviderHealth()
 
@@ -412,11 +456,21 @@ class ProviderRouter:
     ) -> ProviderCandidate:
         if provider == ProviderName.OPENAI:
             model_by_role = {
-                ProviderRole.FAST: str(self._config.get("openai_model_fast") or "gpt-5.6-luna").strip(),
-                ProviderRole.BALANCED: str(self._config.get("openai_model_balanced") or "gpt-5.6-terra").strip(),
-                ProviderRole.EXPERT: str(self._config.get("openai_model_expert") or "gpt-5.6-sol").strip(),
-                ProviderRole.CRITIC: str(self._config.get("openai_model_balanced") or "gpt-5.6-terra").strip(),
-                ProviderRole.VISION: str(self._config.get("openai_model_fast") or "gpt-5.6-luna").strip(),
+                ProviderRole.FAST: str(
+                    self._config.get("openai_model_fast") or "gpt-5.6-luna"
+                ).strip(),
+                ProviderRole.BALANCED: str(
+                    self._config.get("openai_model_balanced") or "gpt-5.6-terra"
+                ).strip(),
+                ProviderRole.EXPERT: str(
+                    self._config.get("openai_model_expert") or "gpt-5.6-sol"
+                ).strip(),
+                ProviderRole.CRITIC: str(
+                    self._config.get("openai_model_balanced") or "gpt-5.6-terra"
+                ).strip(),
+                ProviderRole.VISION: str(
+                    self._config.get("openai_model_fast") or "gpt-5.6-luna"
+                ).strip(),
             }
             effort_by_role = {
                 ProviderRole.FAST: "low",
@@ -427,11 +481,26 @@ class ProviderRouter:
             }
         else:
             model_by_role = {
-                ProviderRole.FAST: str(self._config.get("gemini_model_fast") or "gemini-flash-lite-latest").strip(),
-                ProviderRole.BALANCED: str(self._config.get("gemini_model_balanced") or "gemini-flash-latest").strip(),
-                ProviderRole.EXPERT: str(self._config.get("gemini_model_expert") or "gemini-flash-latest").strip(),
-                ProviderRole.CRITIC: str(self._config.get("gemini_model_critic") or "gemini-flash-latest").strip(),
-                ProviderRole.VISION: str(self._config.get("gemini_model_vision") or "gemini-flash-latest").strip(),
+                ProviderRole.FAST: str(
+                    self._config.get("gemini_model_fast")
+                    or "gemini-flash-lite-latest"
+                ).strip(),
+                ProviderRole.BALANCED: str(
+                    self._config.get("gemini_model_balanced")
+                    or "gemini-flash-latest"
+                ).strip(),
+                ProviderRole.EXPERT: str(
+                    self._config.get("gemini_model_expert")
+                    or "gemini-flash-latest"
+                ).strip(),
+                ProviderRole.CRITIC: str(
+                    self._config.get("gemini_model_critic")
+                    or "gemini-flash-latest"
+                ).strip(),
+                ProviderRole.VISION: str(
+                    self._config.get("gemini_model_vision")
+                    or "gemini-flash-latest"
+                ).strip(),
             }
             effort_by_role = {item: "low" for item in ProviderRole}
 
@@ -464,7 +533,9 @@ class ProviderRouter:
 
     # -.-.-.-
     @staticmethod
-    def _normalize_capability(value: str | ProviderCapability) -> ProviderCapability:
+    def _normalize_capability(
+        value: str | ProviderCapability,
+    ) -> ProviderCapability:
         if isinstance(value, ProviderCapability):
             return value
         try:
@@ -476,6 +547,9 @@ class ProviderRouter:
     @staticmethod
     def _classify_error(exc: Exception) -> tuple[str, bool, bool]:
         text = str(exc or "").casefold()
+        if "no usable text" in text or "no output text" in text:
+            return "empty_response", True, False
+
         if isinstance(exc, (TimeoutError, ConnectionError)) or any(
             marker in text
             for marker in (
@@ -494,10 +568,80 @@ class ProviderRouter:
         ):
             return "transient_provider", True, True
 
-        if any(marker in text for marker in ("401", "403", "invalid api key", "authentication", "unauthorized")):
+        if any(
+            marker in text
+            for marker in (
+                "401",
+                "403",
+                "invalid api key",
+                "authentication",
+                "unauthorized",
+            )
+        ):
             return "provider_auth", False, True
 
-        if any(marker in text for marker in ("400", "invalid argument", "bad request", "safety", "blocked")):
+        if any(
+            marker in text
+            for marker in (
+                "400",
+                "invalid argument",
+                "bad request",
+                "safety",
+                "blocked",
+            )
+        ):
             return "request_rejected", False, False
 
         return "provider_error", False, False
+
+
+_ROUTER_CACHE_LOCK = threading.RLock()
+_ROUTER_CACHE: tuple[str, ProviderRouter] | None = None
+
+
+# -.-.-.-
+def _provider_config_signature(config: Mapping[str, Any]) -> str:
+    """Internal config identity that detects key rotation without retaining raw keys."""
+    relevant_names = (
+        "model_provider_preference",
+        "openai_model_fast",
+        "openai_model_balanced",
+        "openai_model_expert",
+        "gemini_model_fast",
+        "gemini_model_balanced",
+        "gemini_model_expert",
+        "gemini_model_critic",
+        "gemini_model_vision",
+    )
+    payload = {
+        name: str(config.get(name) or "")
+        for name in relevant_names
+    }
+    for secret_name in ("openai_api_key", "gemini_api_key"):
+        secret = str(config.get(secret_name) or "")
+        payload[f"{secret_name}_digest"] = (
+            hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else ""
+        )
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+# -.-.-.-
+def get_provider_router(config: Mapping[str, Any]) -> ProviderRouter:
+    """Return a process-local router so circuit health survives individual tool calls."""
+    global _ROUTER_CACHE
+    signature = _provider_config_signature(config)
+    with _ROUTER_CACHE_LOCK:
+        if _ROUTER_CACHE is not None and _ROUTER_CACHE[0] == signature:
+            return _ROUTER_CACHE[1]
+        router = ProviderRouter(config)
+        _ROUTER_CACHE = (signature, router)
+        return router
+
+
+# -.-.-.-
+def clear_provider_router_cache() -> None:
+    """Test/runtime reset hook; no credential or prompt material is returned."""
+    global _ROUTER_CACHE
+    with _ROUTER_CACHE_LOCK:
+        _ROUTER_CACHE = None
