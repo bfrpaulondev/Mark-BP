@@ -60,7 +60,7 @@ class ExpertReasoningTests(unittest.TestCase):
         ):
             self.assertTrue(expert_reasoning.is_available())
 
-    def test_plugin_uses_provider_router_without_network(self):
+    def test_plugin_uses_shared_provider_router_without_network(self):
         config = {
             "openai_api_key": "test-key",
             "openai_model_expert": "gpt-5.6-sol",
@@ -75,7 +75,11 @@ class ExpertReasoningTests(unittest.TestCase):
 
         with (
             patch.object(expert_reasoning, "get_config", return_value=config),
-            patch.object(expert_reasoning, "ProviderRouter", return_value=fake_router),
+            patch.object(
+                expert_reasoning,
+                "get_provider_router",
+                return_value=fake_router,
+            ) as get_router,
         ):
             result = expert_reasoning.run(
                 {
@@ -85,6 +89,7 @@ class ExpertReasoningTests(unittest.TestCase):
                 }
             )
 
+        get_router.assert_called_once_with(config)
         fake_router.generate_text.assert_called_once()
         kwargs = fake_router.generate_text.call_args.kwargs
         self.assertEqual(kwargs["role"], "expert")
@@ -105,9 +110,15 @@ class ExpertReasoningTests(unittest.TestCase):
         )
         with (
             patch.object(expert_reasoning, "get_config", return_value={}),
-            patch.object(expert_reasoning, "ProviderRouter", return_value=fake_router),
+            patch.object(
+                expert_reasoning,
+                "get_provider_router",
+                return_value=fake_router,
+            ),
         ):
-            result = expert_reasoning.run({"task": "Check this", "role": "balanced"})
+            result = expert_reasoning.run(
+                {"task": "Check this", "role": "balanced"}
+            )
 
         self.assertIn("provider=gemini", result)
         self.assertIn("fallback=1", result)
