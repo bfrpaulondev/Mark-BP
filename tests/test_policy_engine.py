@@ -14,6 +14,8 @@ class PolicyEngineTests(unittest.TestCase):
             ("display_manager", {"action": "list"}),
             ("file_controller", {"action": "read", "path": "documents/a.txt"}),
             ("windows_ui_automation", {"action": "inspect"}),
+            ("desktop_control", {"action": "stats"}),
+            ("code_helper", {"action": "explain", "code": "print('x')"}),
         ):
             with self.subTest(tool=tool, args=args):
                 decision = self.policy.evaluate(tool, args)
@@ -27,6 +29,8 @@ class PolicyEngineTests(unittest.TestCase):
             ("computer_control", {"action": "click", "x": 10, "y": 20}),
             ("computer_settings", {"action": "volume_up"}),
             ("file_controller", {"action": "write", "path": "documents/a.txt"}),
+            ("code_helper", {"action": "edit", "file_path": "documents/example.py"}),
+            ("desktop_control", {"action": "wallpaper", "path": "pictures/a.png"}),
         ):
             with self.subTest(tool=tool, args=args):
                 decision = self.policy.evaluate(tool, args)
@@ -61,6 +65,32 @@ class PolicyEngineTests(unittest.TestCase):
         decision = self.policy.evaluate("computer_settings", {"action": "wifi_toggle"})
         self.assertEqual(decision.effect, PolicyEffect.PRIVILEGED)
         self.assertTrue(decision.requires_approval)
+
+    def test_code_execution_requires_approval(self):
+        for tool, args in (
+            ("code_helper", {"action": "run", "file_path": "documents/example.py"}),
+            ("code_helper", {"action": "build", "description": "make an app"}),
+            ("dev_agent", {"description": "make an app"}),
+        ):
+            with self.subTest(tool=tool, args=args):
+                decision = self.policy.evaluate(tool, args)
+                self.assertEqual(decision.effect, PolicyEffect.PRIVILEGED)
+                self.assertTrue(decision.requires_approval)
+
+    def test_model_generated_desktop_code_requires_approval(self):
+        direct = self.policy.evaluate(
+            "desktop_control",
+            {"action": "task", "task": "click through a settings dialog"},
+        )
+        implicit = self.policy.evaluate(
+            "desktop_control",
+            {"task": "click through a settings dialog"},
+        )
+
+        for decision in (direct, implicit):
+            self.assertEqual(decision.effect, PolicyEffect.PRIVILEGED)
+            self.assertTrue(decision.requires_approval)
+            self.assertEqual(decision.rule_id, "approval.model_generated_desktop_code")
 
     def test_security_bypass_is_blocked_not_approvable(self):
         decision = self.policy.evaluate(
