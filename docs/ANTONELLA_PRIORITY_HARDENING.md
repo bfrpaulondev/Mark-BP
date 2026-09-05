@@ -24,36 +24,36 @@ quando não pode → informa claramente sem inventar sucesso
 - [x] **ANT-257 — Hardening multi-monitor/DPI.** PR #33 integra Per-Monitor DPI Awareness V2, topologia física Win32/MSS, DPI/scale/primary, monitores negativos/acima, hot-plug, pinning de display explícito e stale-frame rejection. Ausência de topologia viva falha fechada. E2E físico continua no ANT-275.
 - [x] **ANT-258 — Aplicar verificação a UIA, ficheiros e settings.** PR #34 fecha o escopo de código: UIA effect reads estruturados e ambiguity fail-closed; filesystem relê source/destination dentro dos mesmos safety roots e verifica conteúdo/estado sem expor paths/conteúdo; settings Windows observáveis são relidos após a acção. Acções sem postcondition observável permanecem explicitamente `verified=false`. E2E físico continua no ANT-275.
 
-**Gate P0:** concluído no código quando PR #34 estiver integrada e verde. Nenhuma acção física/externa crítica das áreas cobertas é anunciada como concluída apenas porque a chamada não lançou exception. O gate de hardware/Windows real permanece separado no ANT-275.
+**Gate P0:** concluído no código. Nenhuma acção física/externa crítica das áreas cobertas é anunciada como concluída apenas porque a chamada não lançou exception. O gate de hardware/Windows real permanece separado no ANT-275.
 
 ## P1 — core de agente
 
-- [ ] **ANT-259 — Extrair `AgentOrchestrator`.** Ciclo incremental `intent → route → policy → execute → observe → verify → recover → finish`, preservando compatibilidade com o runtime actual.
-- [ ] **ANT-260 — Extrair `ToolRouter` e `ExecutionEngine`.** Direct/local → API/DOM/UIA → CV local → modelo barato → Vision/Computer Use.
-- [ ] **ANT-261 — Criar Policy Engine central.** READ/WRITE/EXTERNAL/DESTRUCTIVE/FINANCIAL/PRIVILEGED/BLOCKED, independente do LLM.
-- [ ] **ANT-262 — Aprovação humana vinculada à acção.** Uso único, expiração e identidade da acção; `confirmed=true` vindo do modelo não constitui autorização humana.
-- [ ] **ANT-263 — Provider Router completo.** Interface provider-neutral, roles, fallback, retry controlado, circuit breaker, custo/latência/qualidade e critic.
+- [x] **ANT-259 — Extrair `AgentOrchestrator`.** PR #35 integra o ciclo incremental de execução/observação/verificação preservando o runtime legado.
+- [x] **ANT-260 — Extrair `ToolRouter` e `ExecutionEngine`.** PR #36 separa routing e execução sem big-bang rewrite do runtime.
+- [x] **ANT-261 — Criar Policy Engine central.** PR #38 integra classificação determinística READ/WRITE/EXTERNAL/DESTRUCTIVE/FINANCIAL/PRIVILEGED/BLOCKED independente do LLM.
+- [x] **ANT-262 — Aprovação humana vinculada à acção.** PR #39 integra grants de uso único, expiração e fingerprint da acção; flags do modelo não constituem autorização humana.
+- [x] **ANT-263 — Provider Router completo.** PR #41 integra fronteira provider-neutral para specialist text/vision, roles, fallback, retry controlado e circuit breaker OpenAI↔Gemini. Claude/Groq continuam como expansão futura da interface.
 
-**Gate P1:** nenhuma tool relevante ignora policy/orchestrator; provider pode ser trocado sem regra de negócio depender do SDK.
+**Gate P1:** o core central de orchestration/routing/policy/approval/provider está integrado. Wiring de todas as superfícies legadas continua a ser endurecido incrementalmente; não se assume que E2E físico esteja coberto.
 
 ## P1 — custo, percepção e Computer Use
 
-- [ ] **ANT-264 — Telemetria de custo por tarefa.** Chamadas, tokens quando disponíveis, custo estimado, latência, cache hit e chamadas poupadas.
+- [ ] **ANT-264 — Telemetria de custo por tarefa.** PR #43 em review: usage provider-neutral, latência/retry/fallback, calls saved/cache hits, registry bounded/content-free e custo somente com pricing explícito configurado. Não marcar concluído até integração e CI final.
 - [ ] **ANT-265 — Cache e percepção local.** Frame/keyframe cache, OpenCV/UIA-first e chamadas VLM somente quando acrescentam semântica necessária.
 - [ ] **ANT-266 — Hardening ScreenConnect.** Target-window locking/reacquisition, settle adaptativo, scroll verificável, recuperação, pause/resume/cancel e frames efémeros por default.
 - [ ] **ANT-267 — Melhorar Computer Use recovery.** Replanning quando UI muda, state tracking, bounded retries e evidência de conclusão.
 
 ## P1 — UI/UX e voz das áreas prontas
 
-- [ ] **ANT-268 — Estados operacionais explícitos na UI.** A OUVIR, A PENSAR, A OBSERVAR, A EXECUTAR, A AGUARDAR APROVAÇÃO, FALHOU, CONCLUÍDO.
-- [ ] **ANT-269 — Evoluir Agent Control Center.** Progresso, timeline/evidência, provider/model/custo, janela/ecrã alvo, erro/recovery, Stop/Approve contextuais.
+- [x] **ANT-268 — Estados operacionais explícitos na UI.** PR #37 integrada após principal review; estados desconhecidos permanecem conservadores em vez de aparecerem como PRONTA.
+- [ ] **ANT-269 — Evoluir Agent Control Center.** PR #42 do GLM em principal review; progresso/timeline/evidência/custo/janela alvo e Stop/Approve contextuais sem inventar percentagens/custo.
 - [ ] **ANT-270 — Hardening UI Windows.** DPI/responsividade, keyboard accessibility, empty/error states, microtransições, visual regression e performance.
 - [ ] **ANT-271 — Sincronizar voz com verificação.** Nunca falar sucesso antes do verifier; melhorar barge-in, cancelamento, silêncio/end-of-turn e progresso falado conciso.
 - [ ] **ANT-272 — Limpar identidade herdada.** Remover gradualmente resíduos JARVIS/Mark visíveis ou internos onde não sejam necessários para compatibilidade.
 
 ## P1/P2 — testes e observabilidade
 
-- [ ] **ANT-273 — Windows CI e gates de qualidade.** Windows runner quando viável, Ruff, typecheck, secret/dependency scan, coverage, browser/import/GUI-safe smoke e contract tests.
+- [x] **ANT-273 — Windows CI, primeira fatia.** PR #40 integrada após principal review: Windows Python 3.11/3.12, compile/unit/import-smoke fail-closed e paridade essencial com Ubuntu. Ruff/typecheck/coverage/audits continuam como follow-ups; isto não substitui ANT-275 físico.
 - [ ] **ANT-274 — Structured logging completo.** Correlation/task ID, tool, provider/model, latência, custo, `verified`, erro/recovery e redaction; reduzir `print()` legado progressivamente.
 - [ ] **ANT-275 — Matriz E2E Windows real.** Voz, browser real, UIA, multi-monitor/DPI e ScreenConnect; distinguir sempre unit/integration/CI de E2E físico.
 
@@ -65,13 +65,12 @@ quando não pode → informa claramente sem inventar sucesso
 
 ## Ordem imediata de execução
 
-1. ANT-251–258 — P0 de execução verificável concluído no código;
-2. ANT-259–263 — Orchestrator/ToolRouter/Policy/Provider Router;
-3. ANT-264–267 — custo + Computer Use/ScreenConnect;
-4. ANT-268–272 — UI/voz/identidade;
-5. ANT-273–275 — CI/observabilidade/E2E;
-6. ANT-276–278 — memória/skills/tasks persistentes;
-7. retomar a sequência MT5/Fimathe do plano mestre quando os gates anteriores estiverem verdes.
+1. ANT-251–263 — execução verificável + core de agente integrados;
+2. ANT-264–267 — custo + percepção + Computer Use/ScreenConnect;
+3. ANT-268–272 — UI/voz/identidade em paralelo com GLM e principal review;
+4. ANT-273–275 — CI/observabilidade/E2E, com primeira fatia Windows CI já integrada;
+5. ANT-276–278 — memória/skills/tasks persistentes;
+6. retomar a sequência MT5/Fimathe do plano mestre quando os gates anteriores estiverem verdes.
 
 ## Definição de concluído deste anexo
 
