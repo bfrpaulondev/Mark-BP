@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
+from core.cost_telemetry import get_cost_telemetry, resolve_model_pricing
+from core.providers.contracts import ProviderResponse, ProviderUsage
 from core.providers.gemini_generate import GeminiGenerateClient
 from core.providers.openai_responses import OpenAIResponsesClient
 
@@ -38,7 +40,7 @@ class ProviderAdapter(Protocol):
         model: str,
         prompt: str,
         reasoning_effort: str = "low",
-    ) -> str: ...
+    ) -> str | ProviderResponse: ...
 
     def analyze_image(
         self,
@@ -49,7 +51,7 @@ class ProviderAdapter(Protocol):
         mime_type: str = "image/jpeg",
         detail: str = "low",
         reasoning_effort: str = "low",
-    ) -> str: ...
+    ) -> str | ProviderResponse: ...
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class ProviderAttempt:
     retryable: bool = False
     error_type: str = ""
     error_class: str = ""
+    usage: ProviderUsage = field(default_factory=ProviderUsage)
+    estimated_cost_usd: float | None = None
 
     def safe_metadata(self) -> dict[str, Any]:
         return {
@@ -83,6 +87,8 @@ class ProviderAttempt:
             "retryable": self.retryable,
             "error_type": self.error_type,
             "error_class": self.error_class,
+            "usage": self.usage.safe_metadata(),
+            "estimated_cost_usd": self.estimated_cost_usd,
         }
 
 
@@ -95,6 +101,10 @@ class ProviderResult:
     capability: str
     attempts: tuple[ProviderAttempt, ...] = field(default_factory=tuple)
     fallback_count: int = 0
+    usage: ProviderUsage = field(default_factory=ProviderUsage)
+    telemetry_task_id: str = ""
+    task_estimated_cost_usd: float | None = None
+    cost_complete: bool = False
 
     @property
     def used_fallback(self) -> bool:
@@ -107,6 +117,10 @@ class ProviderResult:
             "role": self.role,
             "capability": self.capability,
             "fallback_count": self.fallback_count,
+            "usage": self.usage.safe_metadata(),
+            "telemetry_task_id": self.telemetry_task_id,
+            "task_estimated_cost_usd": self.task_estimated_cost_usd,
+            "cost_complete": self.cost_complete,
             "attempts": [item.safe_metadata() for item in self.attempts],
         }
 
@@ -126,9 +140,11 @@ class ProviderExhaustedError(RuntimeError):
         attempts: tuple[ProviderAttempt, ...],
         *,
         eligible_providers: tuple[str, ...] = (),
+        telemetry_task_id: str = "",
     ):
         self.attempts = attempts
         self.eligible_providers = eligible_providers
+        self.telemetry_task_id = str(telemetry_task_id or "")
         providers = eligible_providers or tuple(
             dict.fromkeys(item.provider for item in attempts)
         )
@@ -146,7 +162,7 @@ class ProviderRouter:
     specialist text/vision calls with deterministic role selection, retry for
     transient provider failures, cross-provider fallback and an in-memory
     circuit breaker. It never stores raw prompts, images or credentials in
-    health/telemetry metadata.
+    health/cost telemetry metadata.
     """
 
     def __init__(
@@ -249,6 +265,7 @@ class ProviderRouter:
         prompt: str,
         role: str | ProviderRole | None = None,
         preference: str | None = None,
+        telemetry_task_id: str | None = None,
     ) -> ProviderResult:
         prompt = str(prompt or "").strip()
         if not prompt:
@@ -261,6 +278,7 @@ class ProviderRouter:
             image_bytes=None,
             mime_type="",
             detail="low",
+            telemetry_task_id=telemetry_task_id,
         )
 
     # -.-.-.-
@@ -273,6 +291,7 @@ class ProviderRouter:
         preference: str | None = None,
         mime_type: str = "image/jpeg",
         detail: str = "low",
+        telemetry_task_id: str | None = None,
     ) -> ProviderResult:
         prompt = str(prompt or "").strip()
         image = bytes(image_bytes or b"")
@@ -288,6 +307,7 @@ class ProviderRouter:
             image_bytes=image,
             mime_type=str(mime_type or "image/jpeg"),
             detail=str(detail or "low"),
+            telemetry_task_id=telemetry_task_id,
         )
 
     # -.-.-.-
@@ -301,7 +321,15 @@ class ProviderRouter:
         image_bytes: bytes | None,
         mime_type: str,
         detail: str,
+        telemetry_task_id: str | None,
     ) -> ProviderResult:
+        telemetry = get_cost_telemetry()
+        owns_telemetry_task = not bool(str(telemetry_task_id or "").strip())
+        task_id = telemetry.start_task(
+            telemetry_task_id,
+            kind=f"provider_{capability.value}",
+        )
+
         candidates = self.candidate_plan(
             role=role,
             capability=capability,
@@ -309,7 +337,13 @@ class ProviderRouter:
         )
         eligible = tuple(item.provider.value for item in candidates)
         if not candidates:
-            raise ProviderExhaustedError((), eligible_providers=eligible)
+            if owns_telemetry_task:
+                telemetry.finish_task(task_id)
+            raise ProviderExhaustedError(
+                (),
+                eligible_providers=eligible,
+                telemetry_task_id=task_id,
+            )
 
         attempts: list[ProviderAttempt] = []
         for candidate_index, candidate in enumerate(candidates):
@@ -323,7 +357,7 @@ class ProviderRouter:
                     if capability == ProviderCapability.VISION:
                         if image_bytes is None:
                             raise ValueError("Vision request requires image bytes.")
-                        raw_text = adapter.analyze_image(
+                        raw_response = adapter.analyze_image(
                             model=candidate.model,
                             prompt=prompt,
                             image_bytes=image_bytes,
@@ -332,17 +366,41 @@ class ProviderRouter:
                             reasoning_effort=candidate.reasoning_effort,
                         )
                     else:
-                        raw_text = adapter.generate_text(
+                        raw_response = adapter.generate_text(
                             model=candidate.model,
                             prompt=prompt,
                             reasoning_effort=candidate.reasoning_effort,
                         )
 
-                    bounded = str(raw_text or "").strip()[: candidate.max_output_chars]
+                    response = (
+                        raw_response
+                        if isinstance(raw_response, ProviderResponse)
+                        else ProviderResponse(text=str(raw_response or ""))
+                    )
+                    bounded = str(response.text or "").strip()[: candidate.max_output_chars]
                     if not bounded:
                         raise RuntimeError("Provider response contained no usable text.")
 
                     latency = max(0, round((self._clock() - started) * 1000))
+                    pricing = resolve_model_pricing(
+                        self._config,
+                        provider=candidate.provider.value,
+                        model=candidate.model,
+                    )
+                    estimated_cost = telemetry.record_provider_attempt(
+                        task_id,
+                        provider=candidate.provider.value,
+                        model=candidate.model,
+                        capability=capability.value,
+                        role=role.value,
+                        attempt=attempt_number,
+                        ok=True,
+                        latency_ms=latency,
+                        fallback=candidate_index > 0,
+                        retry=attempt_number > 1,
+                        usage=response.usage,
+                        pricing=pricing,
+                    )
                     attempts.append(
                         ProviderAttempt(
                             provider=candidate.provider.value,
@@ -350,9 +408,14 @@ class ProviderRouter:
                             attempt=attempt_number,
                             latency_ms=latency,
                             ok=True,
+                            usage=response.usage,
+                            estimated_cost_usd=estimated_cost,
                         )
                     )
                     self._record_success(candidate.provider)
+                    task_snapshot = telemetry.snapshot(task_id) or {}
+                    if owns_telemetry_task:
+                        task_snapshot = telemetry.finish_task(task_id) or task_snapshot
                     return ProviderResult(
                         text=bounded,
                         provider=candidate.provider.value,
@@ -361,10 +424,34 @@ class ProviderRouter:
                         capability=capability.value,
                         attempts=tuple(attempts),
                         fallback_count=candidate_index,
+                        usage=response.usage,
+                        telemetry_task_id=task_id,
+                        task_estimated_cost_usd=task_snapshot.get("estimated_cost_usd"),
+                        cost_complete=bool(task_snapshot.get("cost_complete", False)),
                     )
                 except Exception as exc:
                     latency = max(0, round((self._clock() - started) * 1000))
                     error_class, retryable, trips_breaker = self._classify_error(exc)
+                    pricing = resolve_model_pricing(
+                        self._config,
+                        provider=candidate.provider.value,
+                        model=candidate.model,
+                    )
+                    telemetry.record_provider_attempt(
+                        task_id,
+                        provider=candidate.provider.value,
+                        model=candidate.model,
+                        capability=capability.value,
+                        role=role.value,
+                        attempt=attempt_number,
+                        ok=False,
+                        latency_ms=latency,
+                        fallback=candidate_index > 0,
+                        retry=attempt_number > 1,
+                        usage=None,
+                        pricing=pricing,
+                        error_class=error_class,
+                    )
                     attempts.append(
                         ProviderAttempt(
                             provider=candidate.provider.value,
@@ -386,9 +473,12 @@ class ProviderRouter:
                         min(0.75, 0.15 * (2 ** (attempt_number - 1)))
                     )
 
+        if owns_telemetry_task:
+            telemetry.finish_task(task_id)
         raise ProviderExhaustedError(
             tuple(attempts),
             eligible_providers=eligible,
+            telemetry_task_id=task_id,
         )
 
     # -.-.-.-
@@ -601,7 +691,7 @@ _ROUTER_CACHE: tuple[str, ProviderRouter] | None = None
 
 # -.-.-.-
 def _provider_config_signature(config: Mapping[str, Any]) -> str:
-    """Internal config identity that detects key rotation without retaining raw keys."""
+    """Internal config identity that detects key/model/price changes without raw keys."""
     relevant_names = (
         "model_provider_preference",
         "openai_model_fast",
@@ -613,16 +703,20 @@ def _provider_config_signature(config: Mapping[str, Any]) -> str:
         "gemini_model_critic",
         "gemini_model_vision",
     )
-    payload = {
+    payload: dict[str, Any] = {
         name: str(config.get(name) or "")
         for name in relevant_names
     }
+    pricing = config.get("model_pricing_usd_per_million_tokens")
+    payload["model_pricing_usd_per_million_tokens"] = (
+        pricing if isinstance(pricing, Mapping) else {}
+    )
     for secret_name in ("openai_api_key", "gemini_api_key"):
         secret = str(config.get(secret_name) or "")
         payload[f"{secret_name}_digest"] = (
             hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else ""
         )
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -641,7 +735,7 @@ def get_provider_router(config: Mapping[str, Any]) -> ProviderRouter:
 
 # -.-.-.-
 def clear_provider_router_cache() -> None:
-    """Test/runtime reset hook; no credential or prompt material is returned."""
+    """Test/runtime reset hook; no credential, prompt or pricing content is returned."""
     global _ROUTER_CACHE
     with _ROUTER_CACHE_LOCK:
         _ROUTER_CACHE = None
