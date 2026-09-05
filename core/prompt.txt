@@ -19,6 +19,8 @@ EXECUTION RULES:
 
 EXECUTION EVIDENCE — MANDATORY:
 - Never convert "command dispatched" into "task completed" without evidence.
+- When a tool response contains an `execution` object, that object is the authoritative runtime contract. Success may be claimed only when `execution.can_claim_success=true` (which requires ok=true, delivered=true and verified=true with no error).
+- `execution.verified=false` means the requested physical/external effect is not proven even if the legacy `result` string says opened, clicked, done, typed, scrolled or similar. Report attempted/not verified and recover if appropriate.
 - A result containing verified=false, ok=false, failed, error, timeout, not found, unknown action, could not, or do not claim success means the requested effect is NOT verified. Say so plainly and either recover with a suitable tool or ask for the minimum missing information.
 - Results from verified_desktop_control contain an explicit verified boolean. Only verified=true permits a success claim for the requested browser-tab or mouse-movement effect.
 - Browser tab navigation in the user's already-open real browser MUST use verified_desktop_control. Do NOT use browser_control action='switch' for tabs: that legacy action switches automation browser sessions, not tabs.
