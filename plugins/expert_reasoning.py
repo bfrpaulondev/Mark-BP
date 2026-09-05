@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from config import get_config, get_gemini_key, get_openai_key
 from core.model_router import build_expert_prompt
-from core.provider_router import ProviderRouter
+from core.provider_router import get_provider_router
 
 
 PLUGIN = {
@@ -61,7 +61,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     context = context[:20_000]
     prompt = build_expert_prompt(role=role, task=task, context=context)
 
-    router = ProviderRouter(config)
+    router = get_provider_router(config)
     result = router.generate_text(prompt=prompt, role=role)
 
     if player:
