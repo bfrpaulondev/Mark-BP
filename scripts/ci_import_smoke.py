@@ -2,9 +2,9 @@
 
 Imports every project module that CI can realistically import without the
 heavy runtime dependencies (PyQt6, pywinauto, psutil, ... are NOT installed
-in the CI environment). Modules whose only problem is a missing third-party
-dependency are skipped; any other import failure (syntax error, broken
-project-local import, platform-specific crash) fails the job.
+in the CI environment). Only known optional/runtime dependency roots may be
+skipped. Unknown missing imports fail the job so local import typos are not
+silently misclassified as third-party dependencies.
 
 Usage: python scripts/ci_import_smoke.py
 """
@@ -20,7 +20,64 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-PROJECT_TOP_LEVEL = {"core", "actions", "config", "dashboard", "memory", "plugins", "ui", "scripts", "docs"}
+PROJECT_TOP_LEVEL = {
+    "core",
+    "actions",
+    "config",
+    "dashboard",
+    "memory",
+    "plugins",
+    "ui",
+    "scripts",
+    "docs",
+}
+
+# Import roots for dependencies intentionally omitted from the minimal CI
+# environment. Keep this list explicit: an unknown ModuleNotFoundError should
+# fail closed instead of hiding a typo in a project-local import.
+ALLOWED_MISSING_IMPORT_ROOTS = {
+    "PIL",
+    "PyQt6",
+    "bs4",
+    "comtypes",
+    "cryptography",
+    "cv2",
+    "ddgs",
+    "edge_tts",
+    "fastapi",
+    "faster_whisper",
+    "google",
+    "kokoro",
+    "miniaudio",
+    "mss",
+    "multipart",
+    "numpy",
+    "playwright",
+    "pptx",
+    "psutil",
+    "pyautogui",
+    "pycaw",
+    "pygetwindow",
+    "pyperclip",
+    "pythoncom",
+    "qrcode",
+    "requests",
+    "send2trash",
+    "sounddevice",
+    "soundfile",
+    "uvicorn",
+    "vosk",
+    "win10toast",
+    "win32api",
+    "win32com",
+    "win32con",
+    "win32gui",
+    "win32process",
+    "win32security",
+    "win32service",
+    "win32serviceutil",
+    "youtube_transcript_api",
+}
 
 # Packages scanned for importable modules. plugins/ is excluded on purpose:
 # drop-in plugin files are loaded by the runtime's own plugin loader, not by
@@ -32,10 +89,12 @@ EXTRA_FILES = (("ui", "runtime_state.py"),)
 
 
 def _classify_import_error(exc: BaseException) -> str | None:
-    """Return 'missing-dep' when the failure is a third-party dependency, else None."""
+    """Return 'missing-dep' only for an explicitly known external dependency."""
     if isinstance(exc, ModuleNotFoundError) and exc.name:
         top = exc.name.split(".", 1)[0]
-        if top not in PROJECT_TOP_LEVEL:
+        if top in PROJECT_TOP_LEVEL:
+            return None
+        if top in ALLOWED_MISSING_IMPORT_ROOTS:
             return "missing-dep"
     return None
 
@@ -64,6 +123,9 @@ def _load_extra_files() -> list[tuple[str, BaseException | None]]:
             # File lives on an unmerged branch; nothing to smoke here yet.
             continue
         spec = importlib.util.spec_from_file_location(f"antonella_smoke_{path.stem}", path)
+        if spec is None or spec.loader is None:
+            results.append((str(path.relative_to(ROOT)), RuntimeError("Could not create import spec.")))
+            continue
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         try:
@@ -74,6 +136,8 @@ def _load_extra_files() -> list[tuple[str, BaseException | None]]:
                 results.append((str(path.relative_to(ROOT)), None))
             else:
                 results.append((str(path.relative_to(ROOT)), exc))
+        finally:
+            sys.modules.pop(spec.name, None)
     return results
 
 
@@ -98,7 +162,7 @@ def main() -> int:
         else:
             failures.append((name, exc))
 
-    print(f"import smoke: {len(imported)} imported, {len(skipped)} skipped (missing dep)")
+    print(f"import smoke: {len(imported)} imported, {len(skipped)} skipped (known missing dep)")
     for name, reason in skipped:
         print(f"  SKIP {name}: {reason}")
     for name, exc in failures:
