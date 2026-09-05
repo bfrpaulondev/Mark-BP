@@ -6,7 +6,7 @@ from datetime import datetime
 
 from config import get_config
 from core.local_command_router import execute_local_intent, parse_local_text_command
-from core.postcondition_verifiers import verify_postcondition
+from core.postcondition_verifiers import verify_open_app_postcondition, verify_postcondition
 from core.tool_verification_policy import requires_postcondition
 from google.genai import types
 from main import (
@@ -113,6 +113,17 @@ class AntonellaLive(JarvisLive):
         def _execute() -> None:
             result = execute_local_intent(intent, player=self.ui)
             message = result.message or "Comando local concluído."
+            if intent.kind == "open_app" and not result.verified:
+                app_name = str(intent.args.get("app_name") or "").strip()
+                verification = verify_open_app_postcondition(app_name)
+                self.ui.write_log(
+                    "SYS: verify · fast-path open_app · "
+                    f"delivered={verification.delivered} · verified={verification.verified}"
+                )
+                if verification.can_claim_success:
+                    message = f"Abri {app_name} e confirmei que a aplicação está em execução."
+                elif verification.error:
+                    message = f"Tentei abrir {app_name}, mas não consegui confirmar: {verification.error}"
             self.ui.write_log(f"{assistant_name}: {message}")
             self._session_log.append(f"{assistant_name}: {message}")
             if not self.ui.muted:
