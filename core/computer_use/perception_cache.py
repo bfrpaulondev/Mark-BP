@@ -175,16 +175,26 @@ class LocalFrameCache:
 
 
 # -.-.-.-
-def build_frame_signature(rgb: Any, np: Any) -> FrameSignature:
-    """Build a compact signature without retaining image data.
+def build_frame_signature(
+    rgb: Any,
+    np: Any,
+    *,
+    raw_bytes: bytes | bytearray | memoryview | None = None,
+) -> FrameSignature:
+    """Build an exact digest plus a compact perceptual signature.
 
-    `np` is injected by the capture layer so importing this module stays safe
-    in dependency-light CI environments where NumPy is intentionally absent.
+    Exact-duplicate suppression is based on a digest of the full captured RGB
+    byte stream when available, never on sparse perceptual samples. The latter
+    are metadata only. `np` is injected so this module still imports in the
+    dependency-light CI environment.
     """
 
     height, width, _ = rgb.shape
     if height <= 0 or width <= 0:
         return FrameSignature(digest="0" * 24, perceptual_hash=0, luma_bucket=0)
+
+    material = raw_bytes if raw_bytes is not None else rgb.tobytes()
+    digest = hashlib.sha256(material).hexdigest()[:24]
 
     ys = np.linspace(0, height - 1, 8, dtype=np.int32)
     xs = np.linspace(0, width - 1, 9, dtype=np.int32)
@@ -200,9 +210,6 @@ def build_frame_signature(rgb: Any, np: Any) -> FrameSignature:
     for bit in comparisons.reshape(-1).tolist():
         perceptual_hash = (perceptual_hash << 1) | int(bool(bit))
 
-    color_sample = sample[:, :8, :]
-    quantized = (color_sample // 16).astype(np.uint8).tobytes()
-    digest = hashlib.sha256(quantized).hexdigest()[:24]
     luma_bucket = max(0, min(31, int(float(gray.mean()) // 8)))
     return FrameSignature(
         digest=digest,
