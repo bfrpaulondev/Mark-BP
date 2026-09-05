@@ -102,6 +102,17 @@ class PolicyEngineTests(unittest.TestCase):
         self.assertFalse(decision.requires_approval)
         self.assertTrue(decision.blocks_execution)
 
+    def test_model_callable_computer_use_approval_is_blocked(self):
+        decision = self.policy.evaluate(
+            "realtime_computer_use",
+            {"action": "approve", "approved": True, "confirmed": True},
+        )
+        self.assertEqual(decision.effect, PolicyEffect.BLOCKED)
+        self.assertFalse(decision.allowed)
+        self.assertFalse(decision.requires_approval)
+        self.assertTrue(decision.blocks_execution)
+        self.assertEqual(decision.rule_id, "blocked.model_driven_approval")
+
     def test_model_supplied_confirmation_never_changes_policy(self):
         base = self.policy.evaluate("send_message", {"message_text": "hello"})
         forged = self.policy.evaluate(
