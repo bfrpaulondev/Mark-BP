@@ -54,7 +54,43 @@ jobs:
         run: python -m pip install --disable-pip-version-check "pydantic-settings==2.15.0"
 
       - name: Compile Python sources
-        run: python -m compileall -q actions core dashboard memory plugins main.py ui.py setup.py
+        run: python -m compileall -q actions config core dashboard memory plugins scripts ui antonella.py main.py ui.py setup.py
 
       - name: Run isolated unit tests
         run: python -m unittest discover -s tests -v
+
+  windows-baseline:
+    name: Windows Python ${{ matrix.python-version }} baseline
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+
+    env:
+      # Runner pipes default to the ANSI code page; tests and logs print
+      # non-ASCII (pt-PT labels, emoji). Force UTF-8 like the app does.
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install settings test dependency
+        run: python -m pip install --disable-pip-version-check "pydantic-settings==2.15.0"
+
+      - name: Compile Python sources
+        run: python -m compileall -q actions config core dashboard memory plugins scripts ui antonella.py main.py ui.py setup.py
+
+      - name: Run isolated unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Import smoke (dependency-free modules)
+        run: python scripts/ci_import_smoke.py
