@@ -16,19 +16,21 @@ class VerifiedDesktopRealBrowserContractTests(unittest.TestCase):
         self.assertIn("window", properties)
         self.assertIn("url", properties)
 
-    @patch("plugins.verified_desktop_control.real_browser_control", return_value='{"verified":true}')
-    @patch("plugins.verified_desktop_control.verified_desktop_control")
-    def test_browser_actions_route_to_real_browser_controller(self, legacy_control, real_control):
-        result = plugin.run({"action": "browser_list_windows"})
+    def test_browser_actions_route_to_real_browser_controller(self):
+        with patch.object(plugin, "real_browser_control", return_value='{"verified":true}') as real_control, patch.object(
+            plugin, "verified_desktop_control"
+        ) as mouse_control:
+            result = plugin.run({"action": "browser_list_windows"})
 
         self.assertEqual(result, '{"verified":true}')
         real_control.assert_called_once()
-        legacy_control.assert_not_called()
+        mouse_control.assert_not_called()
 
-    @patch("plugins.verified_desktop_control.real_browser_control")
-    @patch("plugins.verified_desktop_control.verified_desktop_control", return_value='{"verified":true}')
-    def test_mouse_actions_remain_on_verified_mouse_controller(self, mouse_control, real_control):
-        result = plugin.run({"action": "mouse_move", "x": 20, "y": 30})
+    def test_mouse_actions_remain_on_verified_mouse_controller(self):
+        with patch.object(plugin, "verified_desktop_control", return_value='{"verified":true}') as mouse_control, patch.object(
+            plugin, "real_browser_control"
+        ) as real_control:
+            result = plugin.run({"action": "mouse_move", "x": 20, "y": 30})
 
         self.assertEqual(result, '{"verified":true}')
         mouse_control.assert_called_once()
