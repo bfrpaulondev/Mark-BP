@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from core.computer_use.batching import MAX_ACTIONS_PER_PLAN, sanitize_action_batch
 from core.computer_use.contracts import ComputerAction, FrameSnapshot
 from core.cost_router import ModelRoute, normalize_cost_mode, select_visual_route
+from core.cost_telemetry import get_cost_telemetry
 from core.provider_router import ProviderExhaustedError, ProviderRole, ProviderRouter
 
 
@@ -32,6 +33,7 @@ class ComputerUsePlanner:
         config: Mapping[str, Any],
         *,
         cost_mode: str = "economy",
+        telemetry_task_id: str | None = None,
     ):
         self._config = dict(config)
         self._cost_mode = normalize_cost_mode(cost_mode)
@@ -45,6 +47,11 @@ class ComputerUsePlanner:
         self._provider_router = ProviderRouter(
             self._config,
             max_attempts_per_provider=1,
+        )
+        self._telemetry = get_cost_telemetry()
+        self.telemetry_task_id = self._telemetry.start_task(
+            telemetry_task_id,
+            kind="computer_use",
         )
         self.calls = 0  # logical planning turns (compatibility + budget)
         self.provider_attempts = 0  # actual provider requests, including fallback
@@ -91,6 +98,7 @@ class ComputerUsePlanner:
                 # Preserve the existing cost-router decision as the primary
                 # provider while still allowing the configured fallback.
                 preference=self.route.provider,
+                telemetry_task_id=self.telemetry_task_id,
             )
         except ProviderExhaustedError as exc:
             self.provider_attempts += len(exc.attempts)
@@ -123,6 +131,19 @@ class ComputerUsePlanner:
             history=history,
             step=step,
         )[0]
+
+    def record_saved_model_call(self, *, count: int = 1) -> None:
+        self._telemetry.record_saved_call(
+            self.telemetry_task_id,
+            category="computer_use_batch",
+            count=count,
+        )
+
+    def telemetry_snapshot(self) -> dict[str, Any] | None:
+        return self._telemetry.snapshot(self.telemetry_task_id)
+
+    def finish_telemetry(self) -> dict[str, Any] | None:
+        return self._telemetry.finish_task(self.telemetry_task_id)
 
 
 def _provider_role_for_cost_mode(cost_mode: str) -> ProviderRole:
