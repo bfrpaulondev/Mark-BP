@@ -16,6 +16,16 @@ from core.display_topology import (
 from core.window_geometry import region_savings_ratio, resolve_window_region
 
 
+# -.-.-.-
+def _monitor_geometry(monitor: dict | Any) -> tuple[int, int, int, int]:
+    return (
+        int(monitor.get("left", 0)),
+        int(monitor.get("top", 0)),
+        int(monitor.get("width", 0)),
+        int(monitor.get("height", 0)),
+    )
+
+
 class RealtimeDesktopCapture:
     def __init__(
         self,
@@ -140,6 +150,7 @@ class RealtimeDesktopCapture:
         current_token = ""
         metadata: dict[int, dict[str, Any]] = {}
         pinned_device = ""
+        pinned_geometry: tuple[int, int, int, int] | None = None
         normalized_hint = normalize_monitor_hint(self._monitor_hint)
         explicit_monitor = isinstance(normalized_hint, int)
         sct = None
@@ -180,20 +191,37 @@ class RealtimeDesktopCapture:
 
                     point = active_screen_point()
                     try:
-                        if explicit_monitor and pinned_device:
-                            pinned_index = next(
-                                (
-                                    index
-                                    for index, item in metadata.items()
-                                    if str(item.get("device") or "") == pinned_device
-                                ),
-                                0,
-                            )
+                        if explicit_monitor and (pinned_device or pinned_geometry is not None):
+                            pinned_index = 0
+                            if pinned_device:
+                                pinned_index = next(
+                                    (
+                                        index
+                                        for index, item in metadata.items()
+                                        if str(item.get("device") or "") == pinned_device
+                                    ),
+                                    0,
+                                )
+                            if not pinned_index and pinned_geometry is not None:
+                                pinned_index = next(
+                                    (
+                                        index
+                                        for index, monitor in enumerate(monitors[1:], start=1)
+                                        if _monitor_geometry(monitor) == pinned_geometry
+                                    ),
+                                    0,
+                                )
                             if not pinned_index or pinned_index >= len(monitors):
                                 raise ValueError(
-                                    "The explicitly targeted display is disconnected; waiting for it to return."
+                                    "The explicitly targeted display is disconnected or cannot be identified safely; waiting for it to return."
                                 )
                             base_monitor = monitors[pinned_index]
+                            matched_device = str(
+                                metadata.get(pinned_index, {}).get("device") or ""
+                            )
+                            if matched_device:
+                                pinned_device = matched_device
+                            pinned_geometry = _monitor_geometry(base_monitor)
                         else:
                             base_monitor = select_monitor(
                                 monitors,
@@ -206,6 +234,7 @@ class RealtimeDesktopCapture:
                                 pinned_device = str(
                                     metadata.get(base_index, {}).get("device") or ""
                                 )
+                                pinned_geometry = _monitor_geometry(base_monitor)
                     except ValueError as exc:
                         self._invalidate_latest(str(exc))
                         self._stop_event.wait(min(0.25, interval))
