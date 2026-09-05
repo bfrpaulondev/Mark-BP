@@ -25,6 +25,7 @@ _BG = "#05060b"
 _SURFACE = "#080910"
 _SURFACE_2 = "#0b0c15"
 _BORDER = "#24263a"
+_BORDER_HOVER = "#35384f"
 _TEXT = "#f5f2ff"
 _MUTED = "#8f93b8"
 _FAINT = "#626782"
@@ -268,17 +269,31 @@ class AgentControlDialog(QDialog):
             f"QPushButton{{background:{_VIOLET};color:#09060f;border:0;border-radius:9px;"
             "padding:0 17px;font-weight:700;}"
             f"QPushButton:hover{{background:{_VIOLET_SOFT};}}"
+            f"QPushButton:focus{{background:{_VIOLET_SOFT};outline:none;}}"
             "QPushButton:disabled{background:#242331;color:#666378;}"
         )
         self._stop_button.setStyleSheet(
             f"QPushButton{{background:#24111a;color:{_RED};border:1px solid #4d2635;"
             "border-radius:9px;padding:0 15px;}"
+            f"QPushButton:focus{{border-color:{_RED};outline:none;}}"
             "QPushButton:disabled{color:#6f4a56;border-color:#2b2025;}"
         )
         close_button.setStyleSheet(
             f"QPushButton{{background:{_SURFACE_2};color:{_MUTED};border:1px solid {_BORDER};"
             "border-radius:9px;padding:0 15px;}"
+            f"QPushButton:focus{{color:{_TEXT};border-color:{_BORDER_HOVER};outline:none;}}"
         )
+
+        # A QDialog turns plain QPushButtons into auto-default targets for
+        # Return/Enter. Approval must never fire from a keyboard default;
+        # only an explicit click (mouse, Space on the focused button) does.
+        for button in (self._approve_button, self._stop_button, close_button):
+            button.setAutoDefault(False)
+            button.setDefault(False)
+
+        self._approve_button.setAccessibleName("Aprovar o passo pendente do agente")
+        self._stop_button.setAccessibleName("Parar o agente")
+        close_button.setAccessibleName("Fechar painel do agente")
 
         self._approve_button.clicked.connect(self._approve)
         self._stop_button.clicked.connect(self._stop)
@@ -288,6 +303,11 @@ class AgentControlDialog(QDialog):
         actions.addStretch()
         actions.addWidget(close_button)
         root.addLayout(actions)
+
+        # Keyboard order follows the risk gradient: approve (explicit) ->
+        # stop -> close.
+        QWidget.setTabOrder(self._approve_button, self._stop_button)
+        QWidget.setTabOrder(self._stop_button, close_button)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh)

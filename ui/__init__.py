@@ -74,12 +74,14 @@ def _icon_button(text: str, *, accent: bool = False) -> QPushButton:
             f"QPushButton{{background:{Palette.VIOLET};color:#09060f;border:0;border-radius:11px;"
             "padding:0 18px;font-weight:700;}"
             f"QPushButton:hover{{background:{Palette.VIOLET_SOFT};}}"
+            f"QPushButton:focus{{background:{Palette.VIOLET_SOFT};outline:none;}}"
         )
     else:
         button.setStyleSheet(
             f"QPushButton{{background:{Palette.SURFACE_2};color:{Palette.TEXT_MUTED};"
             f"border:1px solid {Palette.BORDER};border-radius:11px;padding:0 14px;}}"
             f"QPushButton:hover{{color:{Palette.TEXT};border-color:{Palette.BORDER_HOVER};}}"
+            f"QPushButton:focus{{color:{Palette.TEXT};border-color:{Palette.VIOLET};outline:none;}}"
         )
     return button
 
@@ -513,10 +515,13 @@ class AntonellaWindow(QMainWindow):
         settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
         settings_button.setFixedSize(38, 34)
         settings_button.setFont(_font(11, QFont.Weight.Bold))
+        settings_button.setAccessibleName("Abrir definições")
+        settings_button.setToolTip("Definições")
         settings_button.setStyleSheet(
             f"QPushButton{{background:{Palette.SURFACE_2};color:{Palette.TEXT_MUTED};"
             f"border:1px solid {Palette.BORDER};border-radius:9px;}}"
             f"QPushButton:hover{{color:{Palette.TEXT};border-color:{Palette.BORDER_HOVER};}}"
+            f"QPushButton:focus{{color:{Palette.TEXT};border-color:{Palette.VIOLET};outline:none;}}"
         )
         settings_button.clicked.connect(self._configure_api_key)
         header.addWidget(settings_button)
@@ -630,16 +635,45 @@ class AntonellaWindow(QMainWindow):
 
         self._interrupt_button = _icon_button("↓")
         self._interrupt_button.setFixedWidth(50)
+        self._interrupt_button.setAccessibleName("Interromper resposta")
         self._interrupt_button.setToolTip("Interromper resposta · Esc")
         self._interrupt_button.clicked.connect(self._do_interrupt)
         row.addWidget(self._interrupt_button)
 
         self._mic_button = _icon_button("◉", accent=True)
         self._mic_button.setFixedWidth(64)
+        self._mic_button.setAccessibleName("Pausar ou retomar microfone")
         self._mic_button.setToolTip("Pausar/retomar microfone · F4")
         self._mic_button.clicked.connect(self._toggle_mute)
         row.addWidget(self._mic_button)
+
+        # Keyboard order follows the visual row: command → interrupt → mic.
+        QWidget.setTabOrder(self._input, self._interrupt_button)
+        QWidget.setTabOrder(self._interrupt_button, self._mic_button)
         return row
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        handle = self.windowHandle()
+        if handle is not None and not getattr(self, "_screen_hooked", False):
+            handle.screenChanged.connect(self._on_screen_changed)
+            self._screen_hooked = True
+
+    def _on_screen_changed(self, screen) -> None:
+        """Keep the window in view when it lands on another monitor.
+
+        Moving between screens with different DPI/geometry can leave the
+        window fully or partially off-screen; clamp it back immediately.
+        """
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        frame = self.frameGeometry()
+        if geo.contains(frame):
+            return
+        x = max(geo.left(), min(frame.left(), geo.right() - frame.width()))
+        y = max(geo.top(), min(frame.top(), geo.bottom() - frame.height()))
+        self.move(x, y)
 
     def _tick_clock(self) -> None:
         self._clock_label.setText(time.strftime("%H:%M:%S"))
