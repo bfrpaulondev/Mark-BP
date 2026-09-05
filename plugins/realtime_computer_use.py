@@ -14,15 +14,16 @@ PLUGIN = {
         "local live desktop capture, detects meaningful frame changes, rejects stale visual "
         "plans, and calls vision only when needed. Use display_manager first when the user "
         "explicitly identifies monitor/screen 1/2/3. Actions: start, status, pause, resume, "
-        "stop, approve. Never use this for a single click, scroll, typing command, browser "
-        "DOM task, file operation, or app launch."
+        "stop. Approval is intentionally unavailable through this model-callable tool and "
+        "must come from the trusted local approval surface. Never use this for a single "
+        "click, scroll, typing command, browser DOM task, file operation, or app launch."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "start | status | pause | resume | stop | approve",
+                "description": "start | status | pause | resume | stop",
             },
             "objective": {
                 "type": "STRING",
@@ -78,11 +79,17 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         elif action == "stop":
             result = session.stop()
         elif action == "approve":
-            result = session.approve_once()
+            result = {
+                "ok": False,
+                "error": (
+                    "Computer Use approval cannot be granted through the model-callable tool. "
+                    "Use the trusted local approval surface."
+                ),
+            }
         else:
             result = {
                 "ok": False,
-                "error": "Use action=start, status, pause, resume, stop or approve.",
+                "error": "Use action=start, status, pause, resume or stop.",
             }
     except Exception as exc:
         result = {"ok": False, "error": str(exc)}
