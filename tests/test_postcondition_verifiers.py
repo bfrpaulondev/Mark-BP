@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from core.postcondition_verifiers import (
     _expected_windows_processes,
+    capture_postcondition_state,
     verify_focus_window_postcondition,
     verify_open_app_postcondition,
     verify_postcondition,
@@ -19,22 +20,61 @@ class PostconditionVerifierTests(unittest.TestCase):
         self.assertEqual(_expected_windows_processes("My Tool"), {"mytool.exe"})
 
     @patch("core.postcondition_verifiers.platform.system", return_value="Windows")
-    @patch("core.postcondition_verifiers._visible_windows_for_pids")
-    @patch("core.postcondition_verifiers._running_process_matches")
-    def test_open_app_is_verified_when_expected_process_is_observed(
+    @patch("core.postcondition_verifiers.capture_open_app_state")
+    def test_open_app_is_verified_for_new_process_transition(self, capture, _platform):
+        capture.return_value = {
+            "expected_processes": ["chrome.exe"],
+            "processes": [{"pid": 42, "process": "chrome.exe"}],
+            "visible_windows": [{"hwnd": 99, "pid": 42, "title": "Chrome"}],
+            "foreground": {"hwnd": 99, "pid": 42, "title": "Chrome"},
+        }
+
+        result = verify_open_app_postcondition(
+            "Chrome",
+            before_state={"processes": [], "visible_windows": [], "foreground": {}},
+        )
+
+        self.assertTrue(result.can_claim_success)
+        self.assertEqual(result.evidence["delta"]["new_process_pids"], [42])
+        self.assertEqual(result.evidence["delta"]["new_window_handles"], [99])
+
+    @patch("core.postcondition_verifiers.platform.system", return_value="Windows")
+    @patch("core.postcondition_verifiers.capture_open_app_state")
+    def test_open_app_existing_process_without_transition_stays_unverified(
         self,
-        running,
-        windows,
+        capture,
         _platform,
     ):
-        running.return_value = [{"pid": 42, "process": "chrome.exe"}]
-        windows.return_value = [{"hwnd": 99, "pid": 42, "title": "Example - Google Chrome"}]
+        state = {
+            "expected_processes": ["chrome.exe"],
+            "processes": [{"pid": 42, "process": "chrome.exe"}],
+            "visible_windows": [{"hwnd": 99, "pid": 42, "title": "Chrome"}],
+            "foreground": {"hwnd": 99, "pid": 42, "title": "Chrome"},
+        }
+        capture.return_value = state
+
+        result = verify_open_app_postcondition("Chrome", before_state=state)
+
+        self.assertFalse(result.can_claim_success)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.delivered)
+        self.assertFalse(result.verified)
+
+    @patch("core.postcondition_verifiers.platform.system", return_value="Windows")
+    @patch("core.postcondition_verifiers.capture_open_app_state")
+    def test_open_app_without_pre_action_state_stays_unverified(self, capture, _platform):
+        capture.return_value = {
+            "expected_processes": ["chrome.exe"],
+            "processes": [{"pid": 42, "process": "chrome.exe"}],
+            "visible_windows": [],
+            "foreground": {},
+        }
 
         result = verify_open_app_postcondition("Chrome")
 
-        self.assertTrue(result.can_claim_success)
-        self.assertEqual(result.evidence["processes"][0]["pid"], 42)
-        self.assertEqual(result.evidence["visible_windows"][0]["hwnd"], 99)
+        self.assertFalse(result.can_claim_success)
+        self.assertTrue(result.ok)
+        self.assertIn("pre-action", result.message)
 
     @patch("core.postcondition_verifiers.platform.system", return_value="Windows")
     @patch("core.postcondition_verifiers._running_process_matches", return_value=[])
@@ -56,10 +96,20 @@ class PostconditionVerifierTests(unittest.TestCase):
             "open_app",
             {"app_name": "Chrome"},
             "Opened Chrome.",
+            before_state={"processes": []},
         )
 
         self.assertTrue(result.can_claim_success)
-        app_verifier.assert_called_once_with("Chrome")
+        app_verifier.assert_called_once_with("Chrome", before_state={"processes": []})
+
+    @patch("core.postcondition_verifiers.capture_open_app_state")
+    def test_pre_action_capture_is_routed_for_open_app(self, capture):
+        capture.return_value = {"processes": []}
+
+        result = capture_postcondition_state("open_app", {"app_name": "Chrome"})
+
+        self.assertEqual(result, {"processes": []})
+        capture.assert_called_once_with("Chrome")
 
     @patch("core.postcondition_verifiers.platform.system", return_value="Windows")
     @patch(
