@@ -137,6 +137,47 @@ class WindowsUIAutomationTests(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(payload, ensure_ascii=False))
         self.assertEqual(payload["evidence"]["expected_length"], len(secret))
 
+    def test_set_text_readback_failure_does_not_erase_delivery(self):
+        summary = ControlSummary(
+            name="Nome",
+            control_type="Edit",
+            automation_id="nameField",
+            class_name="Edit",
+            enabled=True,
+            visible=True,
+            rectangle=None,
+        )
+        control = Mock()
+        window = SimpleNamespace(handle=42)
+        before = {
+            "control": summary.as_dict(),
+            "focused": True,
+            "selected": None,
+            "toggle_state": None,
+            "expand_state": None,
+            "value_length": 3,
+            "_value": "old",
+        }
+
+        with patch("actions.windows_ui_automation._window_wrapper", return_value=window), \
+             patch("actions.windows_ui_automation._refind", side_effect=[(control, summary), RuntimeError("gone")]), \
+             patch("actions.windows_ui_automation._control_state", return_value=before), \
+             patch("actions.windows_ui_automation._set_control_text", return_value="set_edit_text"):
+            payload = json.loads(
+                windows_ui_automation(
+                    {
+                        "action": "set_text",
+                        "automation_id": "nameField",
+                        "text": "replacement",
+                    }
+                )
+            )
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["delivered"])
+        self.assertFalse(payload["verified"])
+        self.assertTrue(payload["evidence"]["readback_error"])
+
     def test_click_without_structural_transition_stays_unverified(self):
         summary = ControlSummary(
             name="Actualizar",
