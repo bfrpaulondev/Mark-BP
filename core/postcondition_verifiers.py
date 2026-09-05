@@ -129,6 +129,24 @@ def _visible_windows_for_pids(pids: set[int]) -> list[dict[str, Any]]:
 
 
 # -.-.-.-
+def _foreground_window_snapshot() -> dict[str, Any]:
+    if platform.system() != "Windows":
+        return {}
+    try:
+        import win32gui
+        import win32process
+
+        hwnd = int(win32gui.GetForegroundWindow() or 0)
+        if not hwnd:
+            return {}
+        _thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+        title = str(win32gui.GetWindowText(hwnd) or "").strip()
+        return {"hwnd": hwnd, "pid": int(pid), "title": title}
+    except Exception:
+        return {}
+
+
+# -.-.-.-
 def verify_open_app_postcondition(app_name: str) -> ExecutionResult:
     if platform.system() != "Windows":
         return ExecutionResult.unverified_delivery(
@@ -165,6 +183,35 @@ def verify_open_app_postcondition(app_name: str) -> ExecutionResult:
 
 
 # -.-.-.-
+def verify_focus_window_postcondition(title: str) -> ExecutionResult:
+    requested = str(title or "").strip()
+    if not requested:
+        return ExecutionResult.failure("computer_control.focus_window", "No target window title was provided.")
+    if platform.system() != "Windows":
+        return ExecutionResult.unverified_delivery(
+            "computer_control.focus_window",
+            message="Focus command was delivered; this postcondition verifier currently targets Windows.",
+        )
+
+    foreground = _foreground_window_snapshot()
+    actual_title = str(foreground.get("title") or "").strip()
+    verified = bool(actual_title and requested.casefold() in actual_title.casefold())
+    evidence = {"requested_title": requested, "foreground": foreground}
+    if verified:
+        return ExecutionResult.verified_success(
+            "computer_control.focus_window",
+            evidence=evidence,
+            message=f"Foreground window matches '{requested}'.",
+        )
+    return ExecutionResult.failure(
+        "computer_control.focus_window",
+        f"Foreground window did not match '{requested}' after the focus request.",
+        delivered=True,
+        evidence=evidence,
+    )
+
+
+# -.-.-.-
 def verify_postcondition(
     tool_name: str,
     args: Mapping[str, Any] | None,
@@ -173,6 +220,7 @@ def verify_postcondition(
     """Run the strongest available domain verifier, otherwise fail closed."""
     name = str(tool_name or "").strip().lower()
     params = args or {}
+    action = str(params.get("action") or "").strip().lower()
     generic = verify_tool_result(raw_result, action=name)
 
     if generic.can_claim_success or generic.error or generic.requires_approval:
@@ -182,5 +230,8 @@ def verify_postcondition(
         app_name = str(params.get("app_name") or "").strip()
         if app_name:
             return verify_open_app_postcondition(app_name)
+
+    if name == "computer_control" and action == "focus_window" and generic.delivered:
+        return verify_focus_window_postcondition(str(params.get("title") or ""))
 
     return generic
