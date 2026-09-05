@@ -8,15 +8,16 @@ Estado: implementado (slice inicial), sem validação física em Windows.
 
 - `UiState` (StrEnum) — vocabulário operacional canónico:
   `IDLE, LISTENING, THINKING, OBSERVING, EXECUTING, VERIFYING, RECOVERING,
-  WAITING_APPROVAL, COMPLETED, FAILED, CANCELLED`.
-  Membros de compatibilidade legados mantidos: `INITIALISING, SPEAKING,
-  SLEEPING, MUTED`.
+  WAITING_APPROVAL, COMPLETED, FAILED, CANCELLED`, mais `UNKNOWN` como estado
+  conservador para valores inválidos/inesperados. Membros de compatibilidade
+  legados mantidos: `INITIALISING, SPEAKING, SLEEPING, MUTED`.
 - `STATE_LABELS_PT` — rótulo pt-PT único por estado (fonte única para o orb).
 - `normalize_state(value)` — função total: aceita `UiState | str | None`,
   mapeia strings legadas (`PROCESSING → EXECUTING`, `READY/STANDBY → IDLE`,
   `ERROR → FAILED`, `ABORTED → CANCELLED`, `AWAITING_APPROVAL /
-  PENDING_APPROVAL → WAITING_APPROVAL`) e devolve `IDLE` em valores
-  desconhecidos/vazios (fail-closed, sem fugir strings cruas para widgets).
+  PENDING_APPROVAL → WAITING_APPROVAL`) e devolve `UNKNOWN` em valores
+  desconhecidos/vazios. Isto evita que um estado inesperado seja apresentado
+  falsamente como `PRONTA`.
 - `UiRuntimeState` — snapshot imutável com metadados técnicos (`task_id`,
   `task_name`, `progress` (0–100, clamp), `current_step`, `tool`, `provider`,
   `model`, `target_window`, `target_monitor`, `verified`, `error`,
@@ -51,11 +52,11 @@ Estado: implementado (slice inicial), sem validação física em Windows.
 
 ## Testes
 
-`tests/test_ui_runtime_state.py` — 18 testes: normalização total + aliases
-legados + fail-closed, rótulos pt-PT completos, clamp de progresso,
-imutabilidade/cópia, `to_dict` só com metadados técnicos, e contratos de
-binding (`_runtime_state_signal`, `_apply_runtime_state`,
-`set_runtime_state`, dashboard normalizado).
+`tests/test_ui_runtime_state.py` cobre normalização total + aliases legados,
+estado `UNKNOWN` conservador, rótulos pt-PT completos, clamp de progresso,
+imutabilidade/cópia, `to_dict` só com metadados técnicos e contratos de binding
+(`_runtime_state_signal`, `_apply_runtime_state`, `set_runtime_state`, dashboard
+normalizado).
 
 Limitação: validação em Qt offscreen apenas; não validado em Windows físico
 (DPI, multi-monitor) nem com o runtime Gemini Live activo.
