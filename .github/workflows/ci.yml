@@ -94,3 +94,32 @@ jobs:
 
       - name: Import smoke (dependency-free modules)
         run: python scripts/ci_import_smoke.py
+
+  ui-widget-tests:
+    name: UI widget tests (PyQt6 offscreen)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+
+    env:
+      QT_QPA_PLATFORM: "offscreen"
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install UI test dependencies
+        run: python -m pip install --disable-pip-version-check "pydantic-settings==2.15.0" "PyQt6==6.11.0"
+
+      - name: Run full test suite with Qt widgets
+        run: python -m unittest discover -s tests -v
