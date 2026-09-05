@@ -1,35 +1,21 @@
 from __future__ import annotations
 
 import json
-import platform
 from typing import Any
 
-from core.display_selection import describe_monitors, select_monitor, selected_monitor_index
-
-
-# -.-.-.-
-def _active_screen_point() -> tuple[int, int] | None:
-    if platform.system() != "Windows":
-        return None
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        user32 = ctypes.windll.user32
-        hwnd = user32.GetForegroundWindow()
-        rect = wintypes.RECT()
-        if hwnd and user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-            width = rect.right - rect.left
-            height = rect.bottom - rect.top
-            if width > 0 and height > 0:
-                return rect.left + width // 2, rect.top + height // 2
-
-        cursor = wintypes.POINT()
-        if user32.GetCursorPos(ctypes.byref(cursor)):
-            return int(cursor.x), int(cursor.y)
-    except Exception:
-        return None
-    return None
+from core.display_selection import (
+    describe_monitors,
+    normalize_monitor_hint,
+    select_monitor,
+    selected_monitor_index,
+)
+from core.display_topology import (
+    active_screen_point,
+    describe_dpi_metadata,
+    monitor_metadata_by_index,
+    per_monitor_dpi_context,
+    topology_token,
+)
 
 
 # -.-.-.-
@@ -51,40 +37,57 @@ def display_manager(
         )
 
     try:
-        with mss.mss() as sct:
-            monitors = list(sct.monitors)
-            active_point = _active_screen_point()
+        with per_monitor_dpi_context():
+            with mss.mss() as sct:
+                monitors = list(sct.monitors)
+        active_point = active_screen_point()
+        metadata = monitor_metadata_by_index(monitors)
+        token = topology_token(monitors, metadata)
 
-            if action in {"list", "status"}:
-                displays = describe_monitors(monitors, active_point=active_point)
-                return json.dumps(
-                    {
-                        "ok": True,
-                        "count": len(displays),
-                        "displays": displays,
-                        "combined": dict(monitors[0]) if monitors else None,
-                    },
-                    ensure_ascii=False,
-                )
-
-            if action == "resolve":
-                hint: Any = params.get("monitor")
-                target = select_monitor(monitors, point=active_point, hint=hint)
-                index = selected_monitor_index(monitors, target)
-                return json.dumps(
-                    {
-                        "ok": True,
-                        "requested": hint,
-                        "resolved_index": index,
-                        "monitor": dict(target),
-                    },
-                    ensure_ascii=False,
-                )
-
+        if action in {"list", "status"}:
+            displays = describe_monitors(monitors, active_point=active_point)
+            for display in displays:
+                display.update(describe_dpi_metadata(int(display["index"]), metadata))
             return json.dumps(
-                {"ok": False, "error": "Use action=list or resolve."},
+                {
+                    "ok": True,
+                    "count": len(displays),
+                    "displays": displays,
+                    "combined": dict(monitors[0]) if monitors else None,
+                    "topology_token": token,
+                },
                 ensure_ascii=False,
             )
+
+        if action == "resolve":
+            hint: Any = params.get("monitor")
+            normalized_hint = normalize_monitor_hint(hint)
+            target = select_monitor(
+                monitors,
+                point=active_point,
+                hint=hint,
+                strict_hint=isinstance(normalized_hint, int),
+            )
+            index = selected_monitor_index(monitors, target)
+            dpi = describe_dpi_metadata(index, metadata) if index > 0 else {}
+            return json.dumps(
+                {
+                    "ok": True,
+                    "requested": hint,
+                    "resolved_index": index,
+                    "monitor": dict(target),
+                    "dpi": dpi,
+                    "topology_token": token,
+                },
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {"ok": False, "error": "Use action=list or resolve."},
+            ensure_ascii=False,
+        )
+    except ValueError as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
     except Exception as exc:
         if player:
             try:
