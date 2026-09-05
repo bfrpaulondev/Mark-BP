@@ -158,6 +158,28 @@ class AgentControlWidgetTests(unittest.TestCase):
         self.dialog._approve_button.click()
         self.assertEqual(self.session.approve_calls, 1)
 
+    def test_empty_state_never_invents_data(self):
+        self.assertEqual(self.dialog._objective.text(), "Nenhuma tarefa activa")
+        self.assertEqual(self.dialog._provider.value.text(), "—")
+        self.assertEqual(self.dialog._target_window.value.text(), "—")
+        self.assertIn("Ainda não existem passos executados", self.dialog._history.toPlainText())
+
+    def test_notice_colour_follows_state(self):
+        self.session.status_payload = _status(state="failed", last_error="Não consegui confirmar que a janela mudou.")
+        self.dialog.refresh()
+        self.assertIn("#ff6688", self.dialog._notice.styleSheet())
+        self.session.status_payload = _status(state="done", result="Tarefa de demonstração concluída.")
+        self.dialog.refresh()
+        self.assertIn("#68e6b2", self.dialog._notice.styleSheet())
+
+    def test_optional_none_values_do_not_crash(self):
+        self.session.status_payload = _status(
+            requested_monitor=None, monitor_index=None, estimated_cost_usd=None,
+            last_action=None, last_error=None, result=None, objective=None,
+        )
+        self.dialog.refresh()
+        self.assertTrue(self.dialog.isVisible())
+
     def test_history_html_is_escaped_in_rendered_markup(self):
         self.session.status_payload = _status(
             state="executing",
@@ -215,6 +237,36 @@ class MainWindowClampTests(unittest.TestCase):
         placed = self.window.x()
         self.window._on_screen_changed(screen)
         self.assertEqual(self.window.x(), placed)
+
+    # -.-.-.-
+    def test_declared_minimum_is_achievable(self):
+        # The window claims 980x650; the layout minimum must not exceed it
+        # (regression: orb minimum 360 pushed the true minimum to 988).
+        hint = self.window.minimumSizeHint()
+        self.assertLessEqual(hint.width(), 980)
+        self.assertLessEqual(hint.height(), 650)
+
+    def test_widgets_stay_inside_viewport_at_minimum_size(self):
+        self.window.resize(980, 650)
+        self.window.show()
+        self._app.processEvents()
+        viewport = self.window.centralWidget().geometry()
+        self.assertTrue(viewport.contains(self.window.orb.geometry()))
+        self.assertTrue(viewport.contains(self.window._input.geometry()))
+        self.assertTrue(viewport.contains(self.window._mic_button.geometry()))
+
+    def test_orb_animation_timer_follows_visibility(self):
+        self.assertTrue(self.window.orb._timer.isActive())
+        self.window.hide()
+        self.assertFalse(self.window.orb._timer.isActive())
+        self.window.show()
+        self.assertTrue(self.window.orb._timer.isActive())
+
+    def test_log_history_is_bounded(self):
+        log = self.window._log
+        for index in range(600):
+            log.append_event(f"SYS: linha sintética {index}")
+        self.assertLessEqual(log.document().blockCount(), 401)
 
 
 if __name__ == "__main__":

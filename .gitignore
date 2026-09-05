@@ -22,3 +22,6 @@ memory/*.json
 Thumbs.db
 desktop.ini
 *.bak
+
+# ANT-270 visual regression output
+visual_states/
