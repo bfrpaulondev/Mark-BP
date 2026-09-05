@@ -6,17 +6,24 @@ from core.computer_use.contracts import ComputerAction, FrameSnapshot
 from core.computer_use.recovery import (
     RecoveryPolicy,
     RecoveryState,
+    action_plan_is_stale,
     action_uses_planned_coordinates,
     frame_is_superseded,
     target_scope_is_valid,
 )
 
 
-def _frame(sequence: int, *, scope: str = "monitor") -> FrameSnapshot:
+def _frame(
+    sequence: int,
+    *,
+    scope: str = "monitor",
+    left: int = 0,
+    topology_token: str = "topology-1",
+) -> FrameSnapshot:
     return FrameSnapshot(
         sequence=sequence,
         timestamp=1.0,
-        left=0,
+        left=left,
         top=0,
         monitor_width=1920,
         monitor_height=1080,
@@ -26,7 +33,7 @@ def _frame(sequence: int, *, scope: str = "monitor") -> FrameSnapshot:
         change_score=0.1,
         jpeg_bytes=b"x",
         capture_scope=scope,
-        topology_token="topology-1",
+        topology_token=topology_token,
     )
 
 
@@ -90,11 +97,39 @@ class ComputerUseRecoveryTests(unittest.TestCase):
         self.assertNotIn("objective", snapshot)
         self.assertNotIn("text", snapshot)
 
-    def test_newer_emitted_frame_invalidates_plan(self) -> None:
+    def test_newer_emitted_frame_is_detectable(self) -> None:
         planned = _frame(5)
         self.assertFalse(frame_is_superseded(planned, _frame(5)))
         self.assertFalse(frame_is_superseded(planned, _frame(4)))
         self.assertTrue(frame_is_superseded(planned, _frame(6)))
+
+    def test_click_and_text_plans_are_stale_after_meaningful_update(self) -> None:
+        planned = _frame(5)
+        latest = _frame(6)
+        self.assertTrue(
+            action_plan_is_stale(ComputerAction(action="click", x=10, y=10), planned, latest)
+        )
+        self.assertTrue(
+            action_plan_is_stale(ComputerAction(action="type", text="example"), planned, latest)
+        )
+
+    def test_scroll_does_not_replan_for_benign_same_geometry_animation(self) -> None:
+        planned = _frame(5)
+        latest = _frame(6)
+        self.assertFalse(
+            action_plan_is_stale(ComputerAction(action="scroll"), planned, latest)
+        )
+
+    def test_non_coordinate_action_replans_when_capture_geometry_changes(self) -> None:
+        planned = _frame(5)
+        moved = _frame(6, left=-100)
+        topology_changed = _frame(6, topology_token="topology-2")
+        scope_changed = _frame(6, scope="window")
+        action = ComputerAction(action="scroll")
+
+        self.assertTrue(action_plan_is_stale(action, planned, moved))
+        self.assertTrue(action_plan_is_stale(action, planned, topology_changed))
+        self.assertTrue(action_plan_is_stale(action, planned, scope_changed))
 
     def test_target_window_requires_window_capture_scope(self) -> None:
         self.assertTrue(target_scope_is_valid(_frame(1), ""))
