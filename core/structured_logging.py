@@ -379,9 +379,9 @@ def log_provider_attempt(
     latency_ms: int,
     ok: bool,
     retry: bool,
-    retryable: bool,
     fallback: bool,
     cost_usd: float | None,
+    retryable: bool | None = None,
     usage: Mapping[str, Any] | None = None,
     error_type: str = "",
     error_class: str = "",
@@ -401,26 +401,31 @@ def log_provider_attempt(
             except (TypeError, ValueError):
                 usage_fields[name] = 0
 
+    fields: dict[str, Any] = {
+        "provider": str(provider)[:64],
+        "model": str(model)[:128],
+        "capability": str(capability)[:32],
+        "role": str(role)[:32],
+        "attempt": max(1, int(attempt)),
+        "latency_ms": max(0, int(latency_ms)),
+        "ok": bool(ok),
+        "retry": bool(retry),
+        "fallback": bool(fallback),
+        "cost_usd": float(cost_usd) if cost_usd is not None else None,
+        "error": not bool(ok),
+        "error_type": str(error_type or "")[:96],
+        "error_class": str(error_class or "")[:96],
+        **usage_fields,
+    }
+    if retryable is not None:
+        fields["retryable"] = bool(retryable)
+
     log_event(
         logger,
         logging.INFO if ok else logging.WARNING,
         "provider.attempt",
         task_id=task_id,
-        provider=str(provider)[:64],
-        model=str(model)[:128],
-        capability=str(capability)[:32],
-        role=str(role)[:32],
-        attempt=max(1, int(attempt)),
-        latency_ms=max(0, int(latency_ms)),
-        ok=bool(ok),
-        retry=bool(retry),
-        retryable=bool(retryable),
-        fallback=bool(fallback),
-        cost_usd=float(cost_usd) if cost_usd is not None else None,
-        error=not bool(ok),
-        error_type=str(error_type or "")[:96],
-        error_class=str(error_class or "")[:96],
-        **usage_fields,
+        **fields,
     )
 
 
