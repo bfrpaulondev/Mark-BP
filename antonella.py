@@ -6,8 +6,8 @@ from datetime import datetime
 
 from config import get_config
 from core.local_command_router import execute_local_intent, parse_local_text_command
+from core.postcondition_verifiers import verify_open_app_postcondition, verify_postcondition
 from core.tool_verification_policy import requires_postcondition
-from core.verifier import verify_tool_result
 from google.genai import types
 from main import (
     TOOL_DECLARATIONS,
@@ -113,6 +113,17 @@ class AntonellaLive(JarvisLive):
         def _execute() -> None:
             result = execute_local_intent(intent, player=self.ui)
             message = result.message or "Comando local concluído."
+            if intent.kind == "open_app" and not result.verified:
+                app_name = str(intent.args.get("app_name") or "").strip()
+                verification = verify_open_app_postcondition(app_name)
+                self.ui.write_log(
+                    "SYS: verify · fast-path open_app · "
+                    f"delivered={verification.delivered} · verified={verification.verified}"
+                )
+                if verification.can_claim_success:
+                    message = f"Abri {app_name} e confirmei que a aplicação está em execução."
+                elif verification.error:
+                    message = f"Tentei abrir {app_name}, mas não consegui confirmar: {verification.error}"
             self.ui.write_log(f"{assistant_name}: {message}")
             self._session_log.append(f"{assistant_name}: {message}")
             if not self.ui.muted:
@@ -141,7 +152,7 @@ class AntonellaLive(JarvisLive):
         raw_result = payload.get("result")
         action_suffix = str(args.get("action") or "").strip()
         action_name = f"{name}.{action_suffix}" if action_suffix else name
-        execution = verify_tool_result(raw_result, action=action_name)
+        execution = verify_postcondition(name, args, raw_result)
         payload["execution"] = execution.to_dict()
         if not execution.can_claim_success:
             payload["verification_note"] = (
