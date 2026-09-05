@@ -195,3 +195,89 @@ class ContextAndResultTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiVersionRegistryTests(unittest.TestCase):
+    """S1/S2 — real versioning: registering v2 never destroys v1."""
+
+    def _registry_with_active_v1(self) -> SkillRegistry:
+        registry = SkillRegistry()
+        registry.register("demo-skill", "1.0.0", ("filesystem.read",), "low")
+        for state in ("validating", "tested", "awaiting_approval", "active"):
+            registry.transition("demo-skill", state)
+        return registry
+
+    def test_registering_v2_preserves_v1_record(self):
+        registry = self._registry_with_active_v1()
+        registry.register("demo-skill", "1.1.0", ("filesystem.read",), "low")
+        self.assertIsNotNone(registry.get_version("demo-skill", "1.0.0"))
+        self.assertEqual(registry.get_version("demo-skill", "1.0.0").state, "active")
+        self.assertEqual(registry.get("demo-skill").version, "1.1.0")  # latest is the candidate
+
+    def test_rollback_candidate_keeps_v1_active(self):
+        registry = self._registry_with_active_v1()
+        registry.register("demo-skill", "1.1.0", (), "low")
+        registry.transition("demo-skill", "validating")
+        registry.transition("demo-skill", "tested")
+        registry.transition("demo-skill", "awaiting_approval")
+        registry.rollback("demo-skill")
+        self.assertEqual(registry.get_version("demo-skill", "1.1.0").state, "deprecated")
+        self.assertEqual(registry.active_version("demo-skill"), "1.0.0")
+        self.assertEqual(registry.get_version("demo-skill", "1.0.0").state, "active")
+
+    def test_rollback_of_active_v2_restores_v1_to_active(self):
+        registry = self._registry_with_active_v1()
+        registry.register("demo-skill", "1.1.0", (), "low")
+        for state in ("validating", "tested", "awaiting_approval", "active"):
+            registry.transition("demo-skill", state)
+        self.assertEqual(registry.get_version("demo-skill", "1.0.0").state, "deprecated")
+        registry.rollback("demo-skill")
+        self.assertEqual(registry.active_version("demo-skill"), "1.0.0")
+        self.assertEqual(registry.get_version("demo-skill", "1.0.0").state, "active")
+        self.assertEqual(registry.get_version("demo-skill", "1.1.0").state, "deprecated")
+
+    def test_only_one_active_version_at_a_time(self):
+        registry = self._registry_with_active_v1()
+        registry.register("demo-skill", "1.1.0", (), "low")
+        for state in ("validating", "tested", "awaiting_approval", "active"):
+            registry.transition("demo-skill", state)
+        self.assertEqual(len(registry.active_skills()), 1)
+        self.assertEqual(registry.active_skills()[0].version, "1.1.0")
+
+    def test_rollback_from_draft_is_illegal(self):
+        registry = self._registry_with_active_v1()
+        registry.register("demo-skill", "1.1.0", (), "low")
+        with self.assertRaises(ValueError):
+            registry.rollback("demo-skill")
+
+
+class SchemaManifestTests(unittest.TestCase):
+    """S3 — input/output schemas load, validate and round-trip."""
+
+    def test_from_dict_loads_schemas(self):
+        manifest = _manifest(input_schema={"type": "object"}, output_schema={"type": "object"})
+        self.assertEqual(manifest.input_schema, {"type": "object"})
+        self.assertEqual(manifest.output_schema, {"type": "object"})
+
+    def test_invalid_schema_is_flagged_not_crashed(self):
+        manifest = _manifest(input_schema="not-a-mapping", output_schema=42)
+        problems = validate_manifest(manifest)
+        self.assertTrue(any("input_schema" in p for p in problems))
+        self.assertTrue(any("output_schema" in p for p in problems))
+        self.assertEqual(manifest.input_schema, {})
+
+    def test_manifest_round_trip(self):
+        manifest = _manifest(input_schema={"type": "object"}, output_schema={"type": "object"})
+        clone = SkillManifest.from_dict(manifest.to_dict())
+        self.assertEqual(clone, manifest)
+
+    def test_fallback_yaml_parser_loads_schemas_block(self):
+        text = "name: Demo\ninput_schema:\n  - broken\n"  # subset parser yields a list, not a mapping
+        data = parse_manifest_text(text)
+        manifest = SkillManifest.from_dict({**data, **_manifest().__dict__}) if False else SkillManifest.from_dict(
+            {"name": "Demo", "slug": "demo", "version": "1.0.0", "description": "d",
+             "entrypoint": "skill:run", "permissions": [], "risk": "low", "timeout_seconds": 5,
+             "input_schema": data.get("input_schema")}
+        )
+        problems = validate_manifest(manifest)
+        self.assertTrue(any("input_schema" in p for p in problems))

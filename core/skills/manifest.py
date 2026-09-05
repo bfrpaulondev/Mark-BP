@@ -83,10 +83,16 @@ class SkillManifest:
     integrity: str = ""
     input_schema: dict[str, Any] = field(default_factory=dict)
     output_schema: dict[str, Any] = field(default_factory=dict)
+    _schema_problem_input: bool = field(default=False, repr=False)
+    _schema_problem_output: bool = field(default=False, repr=False)
 
     # -.-.-.-
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SkillManifest":
+        # S3: schemas must be mappings; anything else is coerced to an
+        # empty dict and flagged by validate_manifest.
+        input_schema = data.get("input_schema")
+        output_schema = data.get("output_schema")
         return cls(
             name=str(data.get("name", "")),
             slug=str(data.get("slug", "")),
@@ -100,7 +106,32 @@ class SkillManifest:
             compatibility=str(data.get("compatibility", "")),
             author=str(data.get("author", "")),
             integrity=str(data.get("integrity", "")),
+            input_schema=input_schema if isinstance(input_schema, dict) else {},
+            output_schema=output_schema if isinstance(output_schema, dict) else {},
+            _schema_problem_input=not isinstance(input_schema, (dict, type(None))),
+            _schema_problem_output=not isinstance(output_schema, (dict, type(None))),
         )
+
+
+    # -.-.-.-
+    def to_dict(self) -> dict[str, Any]:
+        """Round-trip companion of from_dict (S3)."""
+        return {
+            "name": self.name,
+            "slug": self.slug,
+            "version": self.version,
+            "description": self.description,
+            "entrypoint": self.entrypoint,
+            "permissions": list(self.permissions),
+            "risk": self.risk,
+            "timeout_seconds": self.timeout_seconds,
+            "dependencies": list(self.dependencies),
+            "compatibility": self.compatibility,
+            "author": self.author,
+            "integrity": self.integrity,
+            "input_schema": dict(self.input_schema),
+            "output_schema": dict(self.output_schema),
+        }
 
 
 def validate_manifest(manifest: SkillManifest) -> list[str]:
@@ -120,4 +151,8 @@ def validate_manifest(manifest: SkillManifest) -> list[str]:
         problems.append(f"excessive/unknown permissions: {', '.join(unknown_permissions)}")
     if manifest.timeout_seconds <= 0 or manifest.timeout_seconds > 600:
         problems.append("timeout_seconds must be within 1..600")
+    if manifest._schema_problem_input:
+        problems.append("input_schema must be a mapping")
+    if manifest._schema_problem_output:
+        problems.append("output_schema must be a mapping")
     return problems
