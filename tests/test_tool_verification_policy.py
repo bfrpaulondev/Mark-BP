@@ -10,9 +10,15 @@ class ToolVerificationPolicyTests(unittest.TestCase):
             "computer_control",
             "computer_settings",
             "verified_desktop_control",
-            "windows_ui_automation",
         ):
             self.assertTrue(requires_postcondition(name, {}), name)
+
+    def test_uia_reads_and_effects_are_separated(self):
+        self.assertFalse(requires_postcondition("windows_ui_automation", {"action": "list_windows"}))
+        self.assertFalse(requires_postcondition("windows_ui_automation", {"action": "inspect"}))
+        self.assertFalse(requires_postcondition("windows_ui_automation", {"action": "find"}))
+        self.assertTrue(requires_postcondition("windows_ui_automation", {"action": "click"}))
+        self.assertTrue(requires_postcondition("windows_ui_automation", {"action": "set_text"}))
 
     def test_browser_reads_do_not_require_effect_verification(self):
         self.assertFalse(requires_postcondition("browser_control", {"action": "get_text"}))
