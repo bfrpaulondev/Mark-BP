@@ -21,9 +21,11 @@ spec.loader.exec_module(module)
 VoiceFeedback = module.VoiceFeedback
 cancelled_feedback = module.cancelled_feedback
 execution_result_to_voice_feedback = module.execution_result_to_voice_feedback
+local_command_feedback = module.local_command_feedback
 recovery_feedback = module.recovery_feedback
 
 from core.execution_result import ExecutionResult  # noqa: E402
+from core.local_command_router import LocalCommandResult  # noqa: E402
 
 
 def _result(**overrides) -> ExecutionResult:
@@ -37,6 +39,67 @@ def _result(**overrides) -> ExecutionResult:
     )
     payload.update(overrides)
     return ExecutionResult(**payload)
+
+
+
+
+class LocalCommandFeedbackTests(unittest.TestCase):
+    def test_verified_local_command_speaks_success(self):
+        feedback = local_command_feedback(
+            LocalCommandResult(True, "set_cost", "Modo de custo alterado para economy.", True)
+        )
+        self.assertEqual(feedback.category, "verified_success")
+        self.assertEqual(feedback.phrase_pt, "Modo de custo alterado para economy.")
+
+    def test_unverified_local_command_never_says_success(self):
+        feedback = local_command_feedback(
+            LocalCommandResult(
+                True,
+                "open_app",
+                "Enviei o pedido para abrir notepad; ainda não verifiquei a janela.",
+                False,
+            )
+        )
+        self.assertEqual(feedback.category, "unverified_delivery")
+        self.assertIn("não verifiquei", feedback.phrase_pt)
+
+    def test_error_message_is_passed_through_without_success_claim(self):
+        # LocalCommandResult has no error field: handled+unverified maps to
+        # unverified_delivery, and the honest human message stays untouched.
+        feedback = local_command_feedback(
+            LocalCommandResult(True, "scroll", "Não consegui executar o scroll.", False)
+        )
+        self.assertEqual(feedback.category, "unverified_delivery")
+        self.assertIn("Não consegui executar", feedback.phrase_pt)
+        self.assertNotIn("Concluído", feedback.phrase_pt)
+
+    def test_unhandled_result_is_failure(self):
+        feedback = local_command_feedback(LocalCommandResult(False, "open_app", "", False))
+        self.assertEqual(feedback.category, "failure")
+        self.assertEqual(feedback.phrase_pt, "Não consegui concluir.")
+
+    def test_unverified_empty_message_gets_honest_fallback(self):
+        feedback = local_command_feedback(LocalCommandResult(True, "scroll", "", False))
+        self.assertEqual(feedback.category, "unverified_delivery")
+        self.assertIn("não consegui confirmar", feedback.phrase_pt)
+
+    def test_verifier_result_wins_over_router_result(self):
+        feedback = local_command_feedback(
+            LocalCommandResult(True, "open_app", "Enviei o pedido.", False),
+            verification=ExecutionResult.verified_success("open_app"),
+        )
+        self.assertEqual(feedback.category, "verified_success")
+
+    def test_failed_verifier_result_wins(self):
+        feedback = local_command_feedback(
+            LocalCommandResult(True, "open_app", "Enviei o pedido.", False),
+            verification=ExecutionResult.failure("open_app", "janela não apareceu"),
+        )
+        self.assertEqual(feedback.category, "failure")
+
+    def test_non_local_command_result_fails_closed(self):
+        feedback = local_command_feedback({"ok": True, "verified": True, "message": "x"})
+        self.assertEqual(feedback.category, "failure")
 
 
 class VoiceFeedbackMappingTests(unittest.TestCase):

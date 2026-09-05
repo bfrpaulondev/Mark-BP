@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.execution_result import ExecutionResult
+from core.local_command_router import LocalCommandResult
 
 
 CATEGORIES = (
@@ -72,6 +73,35 @@ def execution_result_to_voice_feedback(result: object) -> VoiceFeedback:
         )
 
     return VoiceFeedback("failure", "Não consegui concluir.")
+
+
+# -.-.-.-
+def local_command_feedback(
+    result: LocalCommandResult,
+    verification: ExecutionResult | None = None,
+) -> VoiceFeedback:
+    """Map a trusted deterministic fast-path outcome into voice feedback.
+
+    ``LocalCommandResult`` is produced by our own router (trusted app
+    code), so the isinstance boundary keeps the same policy as
+    ``execution_result_to_voice_feedback``: only a verified outcome may
+    carry a success utterance, and an explicit verifier result wins when
+    provided.
+    """
+    if verification is not None:
+        return execution_result_to_voice_feedback(verification)
+    if not isinstance(result, LocalCommandResult):
+        return VoiceFeedback("failure", "Não consegui concluir.")
+
+    message = str(result.message or "").strip()
+    if not result.handled:
+        return VoiceFeedback("failure", message or "Não consegui concluir.")
+    if result.verified:
+        return VoiceFeedback("verified_success", message or "Concluído.")
+    return VoiceFeedback(
+        "unverified_delivery",
+        message or "Executei a acção, mas não consegui confirmar o resultado.",
+    )
 
 
 # -.-.-.-
