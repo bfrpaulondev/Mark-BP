@@ -20,14 +20,29 @@ class FilePostconditionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             args = {"action": "create_file", "path": str(root), "name": "note.txt", "content": secret}
-            before = capture_file_state(args)
             with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
                 raw = file_controller(args)
-            execution = verify_postcondition("file_controller", args, raw, before_state=before)
+                execution = verify_postcondition("file_controller", args, raw, before_state=before)
 
         self.assertTrue(execution.can_claim_success)
         self.assertNotIn(secret, json.dumps(execution.to_dict(), ensure_ascii=False))
+        self.assertNotIn("note.txt", json.dumps(execution.evidence, ensure_ascii=False))
         self.assertEqual(execution.evidence["after_source"]["size"], len(secret.encode("utf-8")))
+
+    def test_preexisting_folder_is_not_claimed_as_new_creation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "existing"
+            target.mkdir()
+            args = {"action": "create_folder", "path": str(root), "name": "existing"}
+            with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
+                raw = file_controller(args)
+                execution = verify_postcondition("file_controller", args, raw, before_state=before)
+
+        self.assertTrue(execution.delivered)
+        self.assertFalse(execution.verified)
 
     def test_write_reloads_file_and_verifies_digest(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -35,10 +50,10 @@ class FilePostconditionTests(unittest.TestCase):
             target = root / "data.txt"
             target.write_text("before", encoding="utf-8")
             args = {"action": "write", "path": str(target), "content": "after"}
-            before = capture_file_state(args)
             with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
                 raw = file_controller(args)
-            execution = verify_postcondition("file_controller", args, raw, before_state=before)
+                execution = verify_postcondition("file_controller", args, raw, before_state=before)
 
         self.assertTrue(execution.can_claim_success)
         self.assertEqual(execution.evidence["after_source"]["size"], 5)
@@ -50,10 +65,10 @@ class FilePostconditionTests(unittest.TestCase):
             target = root / "append.txt"
             target.write_text("before", encoding="utf-8")
             args = {"action": "write", "path": str(target), "content": secret, "append": True}
-            before = capture_file_state(args)
             with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
                 raw = file_controller(args)
-            execution = verify_postcondition("file_controller", args, raw, before_state=before)
+                execution = verify_postcondition("file_controller", args, raw, before_state=before)
 
         self.assertTrue(execution.can_claim_success)
         self.assertTrue(execution.evidence["appended_content_match"])
@@ -83,10 +98,10 @@ class FilePostconditionTests(unittest.TestCase):
                 "path": str(source),
                 "destination": str(destination),
             }
-            before = capture_file_state(args)
             with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
                 raw = file_controller(args)
-            execution = verify_postcondition("file_controller", args, raw, before_state=before)
+                execution = verify_postcondition("file_controller", args, raw, before_state=before)
 
         self.assertTrue(execution.can_claim_success)
         self.assertFalse(execution.evidence["after_source"]["exists"])
@@ -104,35 +119,68 @@ class FilePostconditionTests(unittest.TestCase):
                 "path": str(source),
                 "destination": str(destination),
             }
-            before = capture_file_state(args)
             with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
                 raw = file_controller(args)
-            execution = verify_postcondition("file_controller", args, raw, before_state=before)
+                execution = verify_postcondition("file_controller", args, raw, before_state=before)
 
         self.assertTrue(execution.can_claim_success)
         self.assertTrue(execution.evidence["after_destination"]["exists"])
 
+    def test_empty_file_copy_is_verified(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "empty.txt"
+            source.write_bytes(b"")
+            destination = root / "copy.txt"
+            args = {"action": "copy", "path": str(source), "destination": str(destination)}
+            with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
+                raw = file_controller(args)
+                execution = verify_postcondition("file_controller", args, raw, before_state=before)
+
+        self.assertTrue(execution.can_claim_success)
+
     def test_delete_requires_source_to_disappear(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            target = Path(temp_dir) / "delete-me.txt"
+            root = Path(temp_dir)
+            target = root / "delete-me.txt"
             target.write_text("payload", encoding="utf-8")
             args = {"action": "delete", "path": str(target)}
-            before = capture_file_state(args)
-            target.unlink()
-            execution = verify_file_postcondition(args, before_state=before, delivered=True)
+            with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
+                target.unlink()
+                execution = verify_file_postcondition(args, before_state=before, delivered=True)
 
         self.assertTrue(execution.can_claim_success)
 
     def test_unchanged_delete_remains_unverified(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            target = Path(temp_dir) / "keep-me.txt"
+            root = Path(temp_dir)
+            target = root / "keep-me.txt"
             target.write_text("payload", encoding="utf-8")
             args = {"action": "delete", "path": str(target)}
-            before = capture_file_state(args)
-            execution = verify_file_postcondition(args, before_state=before, delivered=True)
+            with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                before = capture_file_state(args)
+                execution = verify_file_postcondition(args, before_state=before, delivered=True)
 
         self.assertFalse(execution.verified)
         self.assertTrue(execution.delivered)
+
+    def test_verifier_does_not_inspect_paths_outside_controller_safety_roots(self):
+        with tempfile.TemporaryDirectory() as allowed_dir, tempfile.TemporaryDirectory() as blocked_dir:
+            allowed = Path(allowed_dir)
+            blocked = Path(blocked_dir)
+            secret = blocked / "secret.txt"
+            secret.write_text("sensitive", encoding="utf-8")
+            args = {"action": "write", "path": str(secret), "content": "replacement"}
+
+            with patch("actions.file_controller._SAFE_ROOTS", [allowed]):
+                state = capture_file_state(args)
+
+        self.assertFalse(state["source"]["resolvable"])
+        self.assertNotIn("sha256", state["source"])
+        self.assertNotIn("size", state["source"])
 
 
 if __name__ == "__main__":
