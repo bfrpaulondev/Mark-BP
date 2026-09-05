@@ -113,6 +113,17 @@ class ComputerUseRecoveryTests(unittest.TestCase):
             action_plan_is_stale(ComputerAction(action="type", text="example"), planned, latest)
         )
 
+    def test_keyboard_and_terminal_decisions_are_stale_after_update(self) -> None:
+        planned = _frame(5)
+        latest = _frame(6)
+        for action in (
+            ComputerAction(action="hotkey", keys="ctrl+s"),
+            ComputerAction(action="press", key="enter"),
+            ComputerAction(action="done", result="completed"),
+            ComputerAction(action="fail", result="cannot continue"),
+        ):
+            self.assertTrue(action_plan_is_stale(action, planned, latest))
+
     def test_scroll_does_not_replan_for_benign_same_geometry_animation(self) -> None:
         planned = _frame(5)
         latest = _frame(6)
