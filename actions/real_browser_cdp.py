@@ -222,20 +222,20 @@ async def _with_cdp(port: int, operation) -> str:
         browser = None
         try:
             browser = await connect(endpoint, **kwargs)
-            return await operation(browser)
+            return await asyncio.wait_for(operation(browser), timeout=5.0)
         except Exception as exc:
             return _result(
                 "browser_cdp",
                 ok=False,
                 delivered=False,
                 verified=False,
-                error=f"Could not attach safely to the local CDP browser: {type(exc).__name__}",
+                error=f"Could not complete the safe local CDP operation: {type(exc).__name__}",
                 evidence={"endpoint": f"127.0.0.1:{port}"},
             )
         finally:
             if browser is not None:
                 try:
-                    await browser.close()
+                    await asyncio.wait_for(browser.close(), timeout=2.0)
                 except Exception:
                     pass
 
@@ -314,20 +314,24 @@ async def _switch_tab_operation(port: int, browser, params: Mapping[str, Any]) -
 
 # -.-.-.-
 def _run_async(coro, *, timeout: float = 10.0) -> str:
-    """Run the short-lived CDP coroutine in its own thread/event loop."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="AntonellaCDP") as executor:
-        future = executor.submit(asyncio.run, coro)
-        try:
-            return future.result(timeout=max(1.0, min(timeout, 20.0)))
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            return _result(
-                "browser_cdp",
-                ok=False,
-                delivered=False,
-                verified=False,
-                error="Local CDP operation timed out.",
-            )
+    """Run the short-lived CDP coroutine in its own thread/event loop without an implicit wait on timeout."""
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="AntonellaCDP")
+    future = executor.submit(asyncio.run, coro)
+    try:
+        return future.result(timeout=max(1.0, min(timeout, 20.0)))
+    except concurrent.futures.TimeoutError:
+        cancelled = future.cancel()
+        if cancelled and hasattr(coro, "close"):
+            coro.close()
+        return _result(
+            "browser_cdp",
+            ok=False,
+            delivered=False,
+            verified=False,
+            error="Local CDP operation timed out.",
+        )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 # -.-.-.-
