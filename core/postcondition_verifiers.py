@@ -5,6 +5,14 @@ import unicodedata
 from collections.abc import Mapping
 from typing import Any
 
+from core.desktop_postconditions import (
+    COMPUTER_CONTROL_INPUT_ACTIONS,
+    WINDOW_SETTING_ACTIONS,
+    capture_computer_input_state,
+    capture_window_setting_state,
+    verify_computer_input_postcondition,
+    verify_window_setting_postcondition,
+)
 from core.execution_result import ExecutionResult
 from core.verifier import verify_tool_result
 
@@ -174,8 +182,13 @@ def capture_postcondition_state(
 ) -> dict[str, Any]:
     name = str(tool_name or "").strip().lower()
     params = args or {}
+    action = str(params.get("action") or "").strip().lower()
     if name == "open_app":
         return capture_open_app_state(str(params.get("app_name") or "").strip())
+    if name == "computer_control" and action in COMPUTER_CONTROL_INPUT_ACTIONS:
+        return capture_computer_input_state(action, params)
+    if name == "computer_settings" and action in WINDOW_SETTING_ACTIONS:
+        return capture_window_setting_state()
     return {}
 
 
@@ -325,5 +338,18 @@ def verify_postcondition(
 
     if name == "computer_control" and action == "focus_window" and generic.delivered:
         return verify_focus_window_postcondition(str(params.get("title") or ""))
+
+    if name == "computer_control" and action in COMPUTER_CONTROL_INPUT_ACTIONS and generic.delivered:
+        return verify_computer_input_postcondition(
+            action,
+            params,
+            before_state=before_state,
+        )
+
+    if name == "computer_settings" and action in WINDOW_SETTING_ACTIONS and generic.delivered:
+        return verify_window_setting_postcondition(
+            action,
+            before_state=before_state,
+        )
 
     return generic
