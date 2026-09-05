@@ -353,30 +353,38 @@ class CostTelemetry:
             state = self._tasks.get(selected)
             if state is None:
                 return None
-            if not state.finished_at:
+            just_finished = not bool(state.finished_at)
+            if just_finished:
                 state.finished_at = float(self._wall_clock())
                 state.finished_monotonic = float(self._monotonic())
             snapshot = self._snapshot_locked(state)
 
-        try:
-            log_event(
-                get_logger("provider"),
-                logging.INFO,
-                "provider.task_finished",
-                task_id=selected,
-                duration_ms=int(snapshot.get("duration_ms") or 0),
-                cost_usd=snapshot.get("estimated_cost_usd"),
-                cost_complete=bool(snapshot.get("cost_complete", False)),
-                input_tokens=int(snapshot.get("input_tokens") or 0),
-                output_tokens=int(snapshot.get("output_tokens") or 0),
-                cached_input_tokens=int(snapshot.get("cached_input_tokens") or 0),
-                reasoning_tokens=int(snapshot.get("reasoning_tokens") or 0),
-                total_tokens=int(snapshot.get("total_tokens") or 0),
-                billable_output_tokens=int(snapshot.get("billable_output_tokens") or 0),
-                ok=int(snapshot.get("failed_calls") or 0) == 0,
-            )
-        except Exception:
-            pass
+        if just_finished:
+            try:
+                log_event(
+                    get_logger("provider"),
+                    logging.INFO,
+                    "provider.task_finished",
+                    task_id=selected,
+                    duration_ms=int(snapshot.get("duration_ms") or 0),
+                    latency_ms=int(snapshot.get("total_latency_ms") or 0),
+                    cost_usd=snapshot.get("estimated_cost_usd"),
+                    cost_complete=bool(snapshot.get("cost_complete", False)),
+                    input_tokens=int(snapshot.get("input_tokens") or 0),
+                    output_tokens=int(snapshot.get("output_tokens") or 0),
+                    cached_input_tokens=int(snapshot.get("cached_input_tokens") or 0),
+                    reasoning_tokens=int(snapshot.get("reasoning_tokens") or 0),
+                    total_tokens=int(snapshot.get("total_tokens") or 0),
+                    billable_output_tokens=int(snapshot.get("billable_output_tokens") or 0),
+                    retry=int(snapshot.get("retries") or 0) > 0,
+                    fallback=int(snapshot.get("fallback_attempts") or 0) > 0,
+                    ok=(
+                        int(snapshot.get("successful_calls") or 0) > 0
+                        or int(snapshot.get("provider_attempts") or 0) == 0
+                    ),
+                )
+            except Exception:
+                pass
         return snapshot
 
     # -.-.-.-
