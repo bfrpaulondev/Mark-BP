@@ -118,10 +118,11 @@ cd Mark-BP
 python -m pip install uv==0.11.33
 uv sync --locked
 uv run playwright install chromium
-uv run python main.py
+uv run python scripts/doctor.py
+uv run python antonella.py
 ```
 
-> **Installation note:** Windows 10/11 is the primary platform during stabilization. Offline STT/TTS engines are optional locked extras; do not install missing modules ad hoc. Follow the [dependency guide](docs/current-state/dependencies.md) and select the required voice profiles before starting the application.
+> **Installation note:** Configure `ANTONELLA_GEMINI_API_KEY` before running the doctor. Windows 10/11 is the primary platform during stabilization. The canonical entrypoint uses Gemini Live audio; legacy STT/TTS extras are not required for that path. Native GUI/audio libraries and devices still need validation. Follow the [testing guide](docs/TESTING.md).
 
 ---
 

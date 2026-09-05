@@ -2,6 +2,11 @@
 
 O entrypoint canónico é `antonella.py`.
 
+A voz deste entrypoint usa Gemini Live: não exige os extras legados Whisper/EdgeTTS.
+O doctor verifica imports nativos e dispositivos de áudio sem gravar/reproduzir som;
+um resultado positivo não comprova autenticação no provider nem E2E Windows.
+Chromium ausente produz um aviso e deve ser instalado para testar o browser gerido.
+
 ## Atualizar
 
 ```powershell
