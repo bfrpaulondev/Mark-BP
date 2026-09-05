@@ -63,10 +63,32 @@ class LocalCommandRouterTests(unittest.TestCase):
 
             self.assertTrue(cost.handled)
             self.assertTrue(provider.handled)
+            self.assertTrue(cost.verified)
+            self.assertTrue(provider.verified)
             self.assertEqual(os.environ["ANTONELLA_COMPUTER_USE_COST_MODE"], "economy")
             self.assertEqual(os.environ["ANTONELLA_MODEL_PROVIDER_PREFERENCE"], "openai")
             self.assertNotIn("ANTONELLA_OPENAI_API_KEY", os.environ)
             self.assertNotIn("ANTONELLA_GEMINI_API_KEY", os.environ)
+
+    def test_legacy_open_app_delivery_is_not_upgraded_to_verified_success(self):
+        with patch("actions.open_app.open_app", return_value="Opened Chrome"):
+            result = execute_local_intent(
+                LocalCommandIntent("open_app", {"app_name": "Chrome"})
+            )
+
+        self.assertTrue(result.handled)
+        self.assertFalse(result.verified)
+        self.assertIn("ainda não verifiquei", result.message)
+
+    def test_legacy_scroll_delivery_is_not_upgraded_to_verified_success(self):
+        with patch("actions.computer_control.computer_control", return_value="Scrolled down ×3"):
+            result = execute_local_intent(
+                LocalCommandIntent("scroll", {"direction": "down", "amount": 3})
+            )
+
+        self.assertTrue(result.handled)
+        self.assertFalse(result.verified)
+        self.assertIn("ainda não foi verificado", result.message)
 
     def test_unknown_or_complex_request_falls_back_to_primary_brain(self):
         for text in (
