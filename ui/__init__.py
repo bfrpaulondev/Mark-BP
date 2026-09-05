@@ -319,6 +319,9 @@ class LogView(QTextEdit):
             text.replace("J.A.R.V.I.S.", self.assistant_name)
             .replace("JARVIS", self.assistant_name)
             .replace("Jarvis", self.assistant_name)
+            # Exact legacy product token only; a bare "Mark" is a common
+            # personal name and must never be rewritten.
+            .replace("MARK LI", self.assistant_name)
         )
         escaped = html.escape(clean)
         lower = clean.lower()
