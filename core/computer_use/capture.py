@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from core.computer_use.contracts import FrameSnapshot
+from core.computer_use.perception_cache import LocalFrameCache, build_frame_signature
 from core.display_selection import normalize_monitor_hint, select_monitor, selected_monitor_index
 from core.display_topology import (
     active_screen_point,
@@ -53,10 +54,22 @@ class RealtimeDesktopCapture:
         self._sequence = 0
         self._error = ""
         self._availability_error = ""
+        self._perception_cache = LocalFrameCache()
+        self._perception_keyframes = 0
+        self._perception_duplicates = 0
 
     @property
     def error(self) -> str:
         return self._error or self._availability_error
+
+    # -.-.-.-
+    def perception_stats(self) -> dict[str, int]:
+        cache_stats = self._perception_cache.stats()
+        return {
+            "keyframes": self._perception_keyframes,
+            "duplicates_suppressed": self._perception_duplicates,
+            "cache_entries": int(cache_stats.get("entries") or 0),
+        }
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -64,6 +77,9 @@ class RealtimeDesktopCapture:
         self._stop_event.clear()
         self._error = ""
         self._availability_error = ""
+        self._perception_cache.clear()
+        self._perception_keyframes = 0
+        self._perception_duplicates = 0
         self._thread = threading.Thread(
             target=self._run,
             daemon=True,
@@ -183,6 +199,7 @@ class RealtimeDesktopCapture:
                             window_region = None
                             window_monitor_index = 0
                             window_region_checked_at = 0.0
+                            self._perception_cache.clear()
 
                         metadata = live_metadata
                         current_token = live_token
@@ -287,12 +304,32 @@ class RealtimeDesktopCapture:
                     )
                     changed_geometry = previous_geometry != geometry
                     change_score = _change_score(previous_gray, gray, np)
+                    signature = build_frame_signature(rgb, np)
+                    scope_key = "|".join(str(item) for item in geometry)
+                    perception = self._perception_cache.observe(
+                        signature,
+                        scope=scope_key,
+                        force_keyframe=changed_geometry,
+                    )
 
-                    if (
+                    should_emit = bool(
                         self._latest is None
                         or changed_geometry
                         or change_score >= self._change_threshold
+                    )
+                    # Only exact compact-digest duplicates may be suppressed.
+                    # Perceptual/near matches are metadata only because hiding a
+                    # semantically meaningful colour/text change would be unsafe.
+                    if (
+                        should_emit
+                        and perception.duplicate
+                        and not changed_geometry
+                        and not perception.keyframe
                     ):
+                        should_emit = False
+                        self._perception_duplicates += 1
+
+                    if should_emit:
                         jpeg, image_width, image_height = _encode_jpeg(
                             rgb,
                             Image,
@@ -302,6 +339,8 @@ class RealtimeDesktopCapture:
                         )
                         dpi = describe_dpi_metadata(monitor_index, metadata)
                         self._sequence += 1
+                        if perception.keyframe:
+                            self._perception_keyframes += 1
                         snapshot = FrameSnapshot(
                             sequence=self._sequence,
                             timestamp=time.time(),
@@ -323,6 +362,10 @@ class RealtimeDesktopCapture:
                             scale_y=float(dpi.get("scale_y") or 1.0),
                             monitor_device=str(dpi.get("device") or ""),
                             monitor_primary=bool(dpi.get("primary", False)),
+                            perception_digest=perception.digest,
+                            perception_keyframe=perception.keyframe,
+                            perception_duplicate=perception.duplicate,
+                            perception_distance=perception.hamming_distance,
                         )
                         with self._condition:
                             self._latest = snapshot
