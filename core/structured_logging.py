@@ -36,6 +36,9 @@ _CONTENT_KEYS = {
     "clipboard",
     "clipboard_text",
     "content",
+    "description",
+    "error_message",
+    "exception_message",
     "file_content",
     "filename",
     "image",
@@ -45,12 +48,15 @@ _CONTENT_KEYS = {
     "path",
     "prompt",
     "query",
+    "raw_response",
     "receiver",
     "response",
+    "response_payload",
     "result_text",
     "screenshot",
     "text",
     "url",
+    "value",
 }
 _CANONICAL_FIELDS = {
     "task_id",
@@ -62,15 +68,30 @@ _CANONICAL_FIELDS = {
     "role",
     "route_tier",
     "policy_effect",
+    "status",
+    "attempt",
     "latency_ms",
     "duration_ms",
     "cost_usd",
+    "cost_complete",
+    "input_tokens",
+    "output_tokens",
+    "cached_input_tokens",
+    "reasoning_tokens",
+    "total_tokens",
+    "billable_output_tokens",
     "delivered",
     "verified",
     "can_claim_success",
     "retry",
+    "retryable",
     "fallback",
     "recovery",
+    "recovery_count",
+    "retry_count",
+    "stale_replans",
+    "target_reacquisitions",
+    "reason_code",
     "requires_approval",
     "executed",
     "ok",
@@ -86,6 +107,9 @@ _OPENAI_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
 _GOOGLE_KEY_RE = re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b")
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _MAX_STRING_LENGTH = 512
+_MAX_DEPTH = 5
+_MAX_MAPPING_ITEMS = 48
+_MAX_SEQUENCE_ITEMS = 32
 
 
 # -.-.-.-
@@ -143,23 +167,65 @@ def _redact_string(value: str) -> str:
 
 # -.-.-.-
 def redact(value: Any, key: str | None = None) -> Any:
-    """Redact secrets/private payloads and bound structured log values.
+    """Redact and bound values before they enter structured observability.
 
-    Content-bearing fields are intentionally removed rather than merely pattern-scrubbed;
-    observability should describe execution metadata, not retain user prompts or desktop data.
+    Content-bearing fields are removed rather than pattern-scrubbed. The traversal is
+    depth/item bounded and cycle-safe so malformed metadata cannot break task execution or
+    create unbounded log records.
     """
+    return _redact(value, key=key, depth=0, seen=set())
+
+
+# -.-.-.-
+def _redact(value: Any, *, key: str | None, depth: int, seen: set[int]) -> Any:
     if key is not None and _is_sensitive_key(key):
         return "[REDACTED]"
     if key is not None and _is_private_content_key(key):
-        if isinstance(value, (bytes, bytearray, memoryview)):
-            return {"redacted": True, "length": len(value)}
-        if isinstance(value, str):
+        if isinstance(value, (bytes, bytearray, memoryview, str)):
             return {"redacted": True, "length": len(value)}
         return "[REDACTED_CONTENT]"
+    if depth >= _MAX_DEPTH:
+        return "[MAX_DEPTH]"
+
     if isinstance(value, Mapping):
-        return {str(k): redact(v, str(k)) for k, v in value.items()}
+        marker = id(value)
+        if marker in seen:
+            return "[CYCLE]"
+        seen.add(marker)
+        try:
+            output: dict[str, Any] = {}
+            for index, (item_key, item_value) in enumerate(value.items()):
+                if index >= _MAX_MAPPING_ITEMS:
+                    output["_truncated"] = True
+                    break
+                normalized_key = str(item_key)[:96]
+                output[normalized_key] = _redact(
+                    item_value,
+                    key=normalized_key,
+                    depth=depth + 1,
+                    seen=seen,
+                )
+            return output
+        finally:
+            seen.discard(marker)
+
     if isinstance(value, (list, tuple, set)):
-        return [redact(item) for item in value]
+        marker = id(value)
+        if marker in seen:
+            return "[CYCLE]"
+        seen.add(marker)
+        try:
+            items = list(value)
+            output = [
+                _redact(item, key=None, depth=depth + 1, seen=seen)
+                for item in items[:_MAX_SEQUENCE_ITEMS]
+            ]
+            if len(items) > _MAX_SEQUENCE_ITEMS:
+                output.append("[TRUNCATED]")
+            return output
+        finally:
+            seen.discard(marker)
+
     if isinstance(value, (bytes, bytearray, memoryview)):
         return {"type": "bytes", "length": len(value)}
     if isinstance(value, str):
@@ -203,19 +269,18 @@ class AntonellaJsonFormatter(logging.Formatter):
             "correlation_id": correlation_id,
             "task_id": task_id,
             "event": _safe_event_name(record.getMessage()),
-            # Backward-compatible alias for existing tooling/tests.
             "message": _safe_event_name(record.getMessage()),
         }
 
         remaining: dict[str, Any] = {}
-        for key, value in safe_fields.items():
-            normalized = str(key)
+        for field_key, field_value in safe_fields.items():
+            normalized = str(field_key)
             if normalized == "task_id":
                 continue
             if normalized in _CANONICAL_FIELDS:
-                payload[normalized] = value
+                payload[normalized] = field_value
             else:
-                remaining[normalized] = value
+                remaining[normalized] = field_value
         if remaining:
             payload["fields"] = remaining
 
@@ -230,7 +295,8 @@ class AntonellaJsonFormatter(logging.Formatter):
 class CorrelationFilter(logging.Filter):
     # -.-.-.-
     def filter(self, record: logging.LogRecord) -> bool:
-        record.correlation_id = _CORRELATION_ID.get()
+        if not getattr(record, "correlation_id", None):
+            record.correlation_id = _CORRELATION_ID.get()
         return True
 
 
@@ -278,11 +344,7 @@ def log_event(
 
 # -.-.-.-
 def log_orchestration_event(event: Any, logger: logging.Logger | None = None) -> None:
-    """Log an OrchestrationEvent without importing the orchestrator module.
-
-    The adapter intentionally consumes only operational metadata already produced by the
-    orchestrator; argument values and tool responses are never inspected here.
-    """
+    """Log an OrchestrationEvent without importing the orchestrator module."""
     target = logger or get_logger("orchestrator")
     stage_obj = getattr(event, "stage", "unknown")
     stage = str(getattr(stage_obj, "value", stage_obj) or "unknown")
@@ -313,14 +375,32 @@ def log_provider_attempt(
     model: str,
     capability: str,
     role: str,
+    attempt: int,
     latency_ms: int,
     ok: bool,
     retry: bool,
+    retryable: bool,
     fallback: bool,
     cost_usd: float | None,
+    usage: Mapping[str, Any] | None = None,
     error_type: str = "",
     error_class: str = "",
 ) -> None:
+    usage_fields: dict[str, int] = {}
+    if isinstance(usage, Mapping):
+        for name in (
+            "input_tokens",
+            "output_tokens",
+            "cached_input_tokens",
+            "reasoning_tokens",
+            "total_tokens",
+            "billable_output_tokens",
+        ):
+            try:
+                usage_fields[name] = max(0, int(usage.get(name) or 0))
+            except (TypeError, ValueError):
+                usage_fields[name] = 0
+
     log_event(
         logger,
         logging.INFO if ok else logging.WARNING,
@@ -330,14 +410,48 @@ def log_provider_attempt(
         model=str(model)[:128],
         capability=str(capability)[:32],
         role=str(role)[:32],
+        attempt=max(1, int(attempt)),
         latency_ms=max(0, int(latency_ms)),
         ok=bool(ok),
         retry=bool(retry),
+        retryable=bool(retryable),
         fallback=bool(fallback),
         cost_usd=float(cost_usd) if cost_usd is not None else None,
         error=not bool(ok),
         error_type=str(error_type or "")[:96],
         error_class=str(error_class or "")[:96],
+        **usage_fields,
+    )
+
+
+# -.-.-.-
+def log_recovery_event(
+    logger: logging.Logger,
+    *,
+    task_id: str,
+    reason_code: str,
+    recovery_count: int,
+    retry_count: int = 0,
+    stale_replans: int = 0,
+    target_reacquisitions: int = 0,
+    retry: bool = False,
+    status: str = "recovering",
+) -> None:
+    """Emit only bounded, runtime-generated recovery metadata."""
+    log_event(
+        logger,
+        logging.WARNING,
+        "computer_use.recovery",
+        task_id=task_id,
+        stage="recover",
+        status=str(status or "recovering")[:32],
+        recovery=True,
+        reason_code=_safe_event_name(reason_code),
+        recovery_count=max(0, int(recovery_count)),
+        retry_count=max(0, int(retry_count)),
+        stale_replans=max(0, int(stale_replans)),
+        target_reacquisitions=max(0, int(target_reacquisitions)),
+        retry=bool(retry),
     )
 
 
