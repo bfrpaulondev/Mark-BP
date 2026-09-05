@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 
 from config import get_config
+from core.agent_orchestrator import AgentOrchestrator, AgentStage, OrchestrationEvent
 from core.local_command_router import execute_local_intent, parse_local_text_command
 from core.postcondition_verifiers import (
     capture_open_app_state,
@@ -30,6 +31,26 @@ DEFAULT_VOICE = "Kore"
 
 class AntonellaLive(JarvisLive):
     """Antonella identity/voice layer over the stabilized legacy realtime engine."""
+
+    # -.-.-.-
+    def __init__(self, ui: JarvisUI):
+        super().__init__(ui)
+        self._last_orchestration_event: OrchestrationEvent | None = None
+        self._agent_orchestrator = AgentOrchestrator(
+            requires_postcondition=requires_postcondition,
+            capture_postcondition_state=capture_postcondition_state,
+            verify_postcondition=verify_postcondition,
+            event_sink=self._on_orchestration_event,
+        )
+
+    # -.-.-.-
+    def _on_orchestration_event(self, event: OrchestrationEvent) -> None:
+        """Keep a lightweight provider-neutral lifecycle signal for UI/observability consumers."""
+        self._last_orchestration_event = event
+        if event.stage == AgentStage.FAILED:
+            self.ui.write_log(
+                f"SYS: agent · failed · {event.tool_name} · {event.metadata.get('error_type', 'error')}"
+            )
 
     # -.-.-.-
     def _build_config(self) -> types.LiveConnectConfig:
@@ -148,45 +169,34 @@ class AntonellaLive(JarvisLive):
 
     # -.-.-.-
     async def _execute_tool(self, fc) -> types.FunctionResponse:
-        """Attach fail-closed execution evidence to side-effecting tool results."""
+        """Run the legacy tool through the provider-neutral orchestration lifecycle."""
         name = str(fc.name or "")
         args = dict(fc.args or {})
-        needs_postcondition = requires_postcondition(name, args)
-        before_state = (
-            capture_postcondition_state(name, args) if needs_postcondition else None
+
+        async def _legacy_executor():
+            return await super(AntonellaLive, self)._execute_tool(fc)
+
+        outcome = await self._agent_orchestrator.run_tool(
+            tool_name=name,
+            args=args,
+            executor=_legacy_executor,
         )
-        base_response = await super()._execute_tool(fc)
-        if not needs_postcondition:
-            return base_response
 
-        try:
-            payload = dict(getattr(base_response, "response", None) or {})
-        except Exception:
-            return base_response
+        execution = outcome.execution
+        if execution is None:
+            return outcome.raw_response
 
-        raw_result = payload.get("result")
         action_suffix = str(args.get("action") or "").strip()
         action_name = f"{name}.{action_suffix}" if action_suffix else name
-        execution = verify_postcondition(
-            name,
-            args,
-            raw_result,
-            before_state=before_state,
-        )
-        payload["execution"] = execution.to_dict()
-        if not execution.can_claim_success:
-            payload["verification_note"] = (
-                "Do not claim this effect succeeded unless execution.can_claim_success is true."
-            )
-
         self.ui.write_log(
             "SYS: verify · "
-            f"{action_name} · delivered={execution.delivered} · verified={execution.verified}"
+            f"{action_name} · delivered={execution.delivered} · verified={execution.verified} · "
+            f"task={outcome.correlation_id}"
         )
         return types.FunctionResponse(
             id=fc.id,
             name=name,
-            response=payload,
+            response=outcome.response_payload,
         )
 
     # -.-.-.-
