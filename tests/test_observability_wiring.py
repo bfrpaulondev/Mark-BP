@@ -10,7 +10,7 @@ from core.computer_use.recovery import RecoveryState
 from core.cost_telemetry import CostTelemetry, ModelPricing
 from core.execution_result import ExecutionResult
 from core.providers.contracts import ProviderUsage
-from core.structured_logging import configure_logging, redact
+from core.structured_logging import configure_logging, get_logger, redact
 
 
 class _Response:
@@ -48,6 +48,25 @@ class StructuredObservabilityPrivacyTests(unittest.TestCase):
         self.assertEqual(safe["image_bytes"]["length"], 6)
         self.assertIsNone(safe["metric_nan"])
         self.assertIsNone(safe["metric_inf"])
+
+    def test_exception_logging_keeps_type_but_not_message_or_traceback(self) -> None:
+        stream = io.StringIO()
+        configure_logging(stream=stream)
+        logger = get_logger("privacy.exception")
+        secret = "person@example.com private exception payload"
+
+        try:
+            raise RuntimeError(secret)
+        except RuntimeError:
+            logger.exception("runtime.failure")
+
+        rows = _rows(stream)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["event"], "runtime.failure")
+        self.assertEqual(rows[0]["exception"], {"type": "RuntimeError"})
+        self.assertNotIn(secret, stream.getvalue())
+        self.assertNotIn("person@example.com", stream.getvalue())
+        self.assertNotIn("traceback", stream.getvalue().lower())
 
     def test_recovery_logging_uses_reason_codes_not_runtime_reason_text(self) -> None:
         stream = io.StringIO()
