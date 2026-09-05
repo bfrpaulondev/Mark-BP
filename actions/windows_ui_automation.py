@@ -389,7 +389,10 @@ def _public_state(state: Mapping[str, Any]) -> dict[str, Any]:
 
 # -.-.-.-
 def _state_changed(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
-    keys = ("focused", "selected", "toggle_state", "expand_state", "value_length")
+    # Focus is an expected side effect of many activations, not proof that the
+    # requested control produced its intended effect. Keep it in evidence, but
+    # require a stronger state transition before claiming success.
+    keys = ("selected", "toggle_state", "expand_state", "value_length")
     for key in keys:
         before_value = before.get(key)
         after_value = after.get(key)
@@ -477,8 +480,10 @@ def windows_ui_automation(
             window_transition = bool(
                 before_foreground and after_foreground and before_foreground != after_foreground
             )
+            # A foreground-window change can race with unrelated user activity and a
+            # focus-only change merely proves that input reached the control. Both
+            # remain useful evidence, but neither is a reliable postcondition.
             verified = _state_changed(before, after) if after else False
-            verified = bool(verified or window_transition)
             evidence = {
                 "method": method,
                 "before": _public_state(before),
