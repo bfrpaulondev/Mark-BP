@@ -17,20 +17,26 @@ class AntonellaExecutionVerifierWiringTests(unittest.TestCase):
         self.assertIn("outcome.response_payload", source)
         self.assertIn("execution.verified", source)
 
-    def test_orchestrator_owns_pre_state_before_legacy_executor_dispatch(self):
+    def test_orchestrator_owns_pre_state_before_execution_engine_dispatch(self):
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "agent_orchestrator.py").read_text(encoding="utf-8")
 
-        self.assertLess(
-            source.index("self._capture_postcondition_state(name, params)"),
-            source.index("raw_response = executor()"),
-        )
-        self.assertLess(
-            source.index("raw_response = executor()"),
-            source.index("execution = self._verify_postcondition("),
-        )
+        capture = source.index("self._capture_postcondition_state(name, params)")
+        dispatch = source.index("await self._execution_engine.execute(route, executor)")
+        verify = source.index("execution = self._verify_postcondition(")
+
+        self.assertLess(capture, dispatch)
+        self.assertLess(dispatch, verify)
         self.assertIn('payload["execution"] = execution.to_dict()', source)
         self.assertIn("execution.can_claim_success", source)
+
+    def test_execution_engine_owns_sync_async_executor_boundary(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "execution_engine.py").read_text(encoding="utf-8")
+
+        self.assertIn("raw_response = executor()", source)
+        self.assertIn("inspect.isawaitable(raw_response)", source)
+        self.assertIn("raw_response = await raw_response", source)
 
     def test_core_prompt_treats_execution_contract_as_authoritative(self):
         root = Path(__file__).resolve().parent.parent

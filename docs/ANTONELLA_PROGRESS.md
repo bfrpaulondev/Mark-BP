@@ -4,19 +4,19 @@
 
 **Última atualização:** 2026-09-05
 **Branch canónica:** `main`
-**Main confirmado antes da PR #34:** `6cd8601b9a0a9b4d3a9a94ceb701f5ab993fd8c8`
+**Main confirmado antes da PR #36:** `c76df10bb71254f61863141c9dac3bd861506a98`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa a fechar | ANT-258 — UIA/files/settings verification |
-| Branch de implementação | `codex/ant-258-uia-files-settings-verification` |
-| Pull request | PR #34 — verify UIA, filesystem and Windows settings effects |
+| Tarefa a fechar | ANT-260 — ToolRouter + ExecutionEngine |
+| Branch de implementação | `codex/ant-260-tool-router-execution-engine` |
+| Pull request | PR #36 — extract ToolRouter and ExecutionEngine |
 | Issues abertas | Nenhuma necessária para este trabalho |
-| CI de código | #105 verde em Dependency lock + Python 3.11 + Python 3.12 no head inicial; nova execução pendente após hardening UIA |
+| CI de código | PR #35 verde e integrada; CI da PR #36 pendente no head de documentação |
 | Próximo teste real | ANT-275 Windows físico: UIA, settings, filesystem, multi-monitor/DPI e browser real |
-| Próximo bloco | ANT-259 — extrair `AgentOrchestrator` incremental sem quebrar o runtime actual |
+| Próximo bloco | ANT-261 — Policy Engine central independente do LLM |
 
 ## Prioridade aprovada em 2026-09-05
 
@@ -42,6 +42,8 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - PR #31: SPA/popups/downloads; merge `3186a1406f496a7004c8696805680c50b7e59a3e`.
 - PR #32: safe optional CDP bridge; merge `aaabdda9485483712b88413f3be4e584be3e3886`.
 - PR #33: multi-monitor/DPI hardening; merge `6cd8601b9a0a9b4d3a9a94ceb701f5ab993fd8c8`; stale display frames falham fechados.
+- PR #34: UIA/files/settings postconditions; merge `34b3f54`; CI verde; E2E Windows físico pendente.
+- PR #35: `AgentOrchestrator` incremental; merge `c76df10bb71254f61863141c9dac3bd861506a98`; CI verde.
 
 ## ANT-257 — integrado
 
@@ -89,6 +91,24 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - minimize/maximize/switch_window mantêm o verificador Win32 anterior;
 - se o estado não puder ser observado, a acção não é promovida a sucesso.
 
+## ANT-259 — integrado por PR #35
+
+- lifecycle explícito no `AgentOrchestrator`;
+- callbacks provider-neutral para captura e verificação;
+- correlation id e eventos sem valores dos argumentos;
+- runtime legado preservado;
+- CI verde; smoke test Windows real pendente.
+
+## ANT-260 — PR #36
+
+- `ToolRouter` classifica ferramentas existentes por tier sem as executar;
+- prioridade explícita: direct/local → API/DOM/UIA → CV local → modelo rápido → Vision/Computer Use;
+- `ExecutionEngine` possui o despacho sync/async e preserva exceções/cancelamento;
+- tools desconhecidas mantêm fallback legado;
+- router e engine são injectáveis no `AgentOrchestrator`;
+- metadados de rota não incluem valores dos argumentos;
+- não altera policy, approvals nem provider selection.
+
 ## Realtime Computer Use económico — integrado, E2E físico pendente
 
 - stream desktop em background com tiers locais;
@@ -104,14 +124,12 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - Unit tests/CI Linux não provam Win32, UIA, pycaw, WMI/CIM, áudio físico, DPI, multi-monitor, Playwright GUI/CDP real ou ScreenConnect.
 - Um efeito sem estado observável suficiente permanece `verified=false`.
 - E2E Windows físico continua centralizado no ANT-275.
-- A extracção do `main.py` pode começar incrementalmente no ANT-259 depois da integração da PR #34.
+- O `AgentOrchestrator` está integrado; ToolRouter/ExecutionEngine permanecem em PR até CI e revisão.
 
 ## Próxima sequência
 
-1. obter revisão humana da PR #34 e integrar apenas com a CI final verde;
-2. ANT-259 — `AgentOrchestrator` incremental;
-3. ANT-260 — `ToolRouter` + `ExecutionEngine`;
-4. ANT-261/262 — Policy Engine + aprovação humana vinculada;
-5. ANT-263 — Provider Router completo;
-6. ANT-264–267 — custo/Computer Use/ScreenConnect;
-7. ANT-268+ — UI/voz/observabilidade/E2E/memória.
+1. validar e integrar PR #36 apenas com CI final verde;
+2. ANT-261/262 — Policy Engine + aprovação humana vinculada;
+3. ANT-263 — Provider Router completo;
+4. ANT-264–267 — custo/Computer Use/ScreenConnect;
+5. ANT-268+ — UI/voz/observabilidade/E2E/memória.
