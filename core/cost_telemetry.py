@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 import threading
@@ -12,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.providers.contracts import ProviderUsage
+from core.structured_logging import get_logger, log_event, log_provider_attempt
 
 
 _MAX_TASKS = 256
@@ -105,8 +107,6 @@ def _safe_task_id(value: str | None) -> str:
         return uuid.uuid4().hex[:16]
     if _SAFE_TASK_ID_RE.fullmatch(raw):
         return raw
-    # Task IDs are identifiers, not a storage channel. Preserve correlation for
-    # arbitrary caller strings through a deterministic digest without retaining text.
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
     return f"task-{digest}"
 
@@ -160,13 +160,7 @@ def resolve_model_pricing(
     provider: str,
     model: str,
 ) -> ModelPricing | None:
-    """Resolve an explicitly configured price without network calls or defaults.
-
-    Supported table keys are `provider/model` (preferred) and bare `model` for
-    convenience. Values are USD per one million tokens with keys `input`,
-    `output` and optional `cached_input`.
-    """
-
+    """Resolve an explicitly configured price without network calls or defaults."""
     if not isinstance(config, Mapping):
         return None
     table = config.get("model_pricing_usd_per_million_tokens")
@@ -187,7 +181,6 @@ def estimate_usage_cost_usd(
     pricing: ModelPricing | None,
 ) -> float | None:
     """Return a defensible estimate or None when required information is absent."""
-
     if usage is None or not usage.has_usage or pricing is None:
         return None
 
@@ -196,8 +189,6 @@ def estimate_usage_cost_usd(
     cached_tokens = min(input_tokens, max(0, int(usage.cached_input_tokens)))
     uncached_tokens = max(0, input_tokens - cached_tokens)
 
-    # A provider reporting only total_tokens gives too little information to
-    # apply separate input/output rates safely.
     if not input_tokens and not priced_output_tokens:
         return None
     if uncached_tokens and pricing.input_per_million is None:
@@ -312,6 +303,27 @@ class CostTelemetry:
             if len(state.events) > self._max_events:
                 del state.events[: len(state.events) - self._max_events]
             self._tasks.move_to_end(selected)
+
+        try:
+            log_provider_attempt(
+                get_logger("provider"),
+                task_id=selected,
+                provider=event.provider,
+                model=event.model,
+                capability=event.capability,
+                role=event.role,
+                attempt=event.attempt,
+                latency_ms=event.latency_ms,
+                ok=event.ok,
+                retry=event.retry,
+                retryable=False,
+                fallback=event.fallback,
+                cost_usd=event.estimated_cost_usd,
+                usage=safe_usage.safe_metadata(),
+                error_class=event.error_class,
+            )
+        except Exception:
+            pass
         return estimate
 
     # -.-.-.-
@@ -344,7 +356,28 @@ class CostTelemetry:
             if not state.finished_at:
                 state.finished_at = float(self._wall_clock())
                 state.finished_monotonic = float(self._monotonic())
-            return self._snapshot_locked(state)
+            snapshot = self._snapshot_locked(state)
+
+        try:
+            log_event(
+                get_logger("provider"),
+                logging.INFO,
+                "provider.task_finished",
+                task_id=selected,
+                duration_ms=int(snapshot.get("duration_ms") or 0),
+                cost_usd=snapshot.get("estimated_cost_usd"),
+                cost_complete=bool(snapshot.get("cost_complete", False)),
+                input_tokens=int(snapshot.get("input_tokens") or 0),
+                output_tokens=int(snapshot.get("output_tokens") or 0),
+                cached_input_tokens=int(snapshot.get("cached_input_tokens") or 0),
+                reasoning_tokens=int(snapshot.get("reasoning_tokens") or 0),
+                total_tokens=int(snapshot.get("total_tokens") or 0),
+                billable_output_tokens=int(snapshot.get("billable_output_tokens") or 0),
+                ok=int(snapshot.get("failed_calls") or 0) == 0,
+            )
+        except Exception:
+            pass
+        return snapshot
 
     # -.-.-.-
     def snapshot(self, task_id: str) -> dict[str, Any] | None:
