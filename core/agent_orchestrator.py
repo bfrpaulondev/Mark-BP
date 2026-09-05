@@ -220,7 +220,6 @@ class AgentOrchestrator:
                     "Do not claim this effect succeeded unless execution.can_claim_success is true."
                 )
 
-        payload["policy"] = decision.safe_metadata()
         duration_ms = max(0, round((time.monotonic() - started) * 1000))
         self._emit(
             events,
