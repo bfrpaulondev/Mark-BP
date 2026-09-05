@@ -32,9 +32,9 @@ PLUGIN = {
         "explicit verification. If the user's Chromium browser was already explicitly started with local remote "
         "debugging, browser_cdp_status/browser_cdp_list_tabs/browser_cdp_switch_tab may use that exact loopback "
         "endpoint as a structured fallback when UI Automation cannot expose the tab state. Antonella never scans "
-        "ports, enables remote debugging, or relaunches the browser for CDP. Every effect result exposes a verified "
-        "boolean. Do not create a separate Playwright browser session just to navigate the user's existing browser. "
-        "If verified=false, never tell the user the action succeeded."
+        "ports, enables remote debugging, or relaunches the browser for CDP. Every effect result exposes a "
+        "verified boolean. Do not create a separate Playwright browser session just to navigate the user's existing "
+        "browser. If verified=false, never tell the user the action succeeded."
     ),
     "parameters": {
         "type": "OBJECT",
