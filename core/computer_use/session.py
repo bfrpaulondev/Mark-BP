@@ -123,8 +123,11 @@ class RealtimeComputerUseSession:
                 max_steps = max(1, min(max_steps, int(max_steps_override)))
 
             with self._lock:
-                self._state.provider = planner.route.provider
-                self._state.model = planner.route.model
+                self._state.provider = planner.last_provider
+                self._state.model = planner.last_model
+
+            last_logged_provider = planner.last_provider
+            last_logged_model = planner.last_model
 
             if self._state.target_window:
                 from actions.computer_control import computer_control
@@ -168,7 +171,7 @@ class RealtimeComputerUseSession:
                 "Computer Use · live capture started "
                 f"(requested={requested_text}, resolved monitor {frame.monitor_index}, "
                 f"scope={scope_text}, {budget.capture_fps} FPS local, "
-                f"{planner.route.provider}/{planner.route.model})"
+                f"{planner.last_provider}/{planner.last_model})"
             )
 
             history: list[str] = []
@@ -195,7 +198,22 @@ class RealtimeComputerUseSession:
                 )
 
                 with self._lock:
-                    self._state.model_calls = planner.calls
+                    # Count actual provider requests, including fallback, instead
+                    # of reporting only logical planning turns.
+                    self._state.model_calls = planner.provider_attempts
+                    self._state.provider = planner.last_provider
+                    self._state.model = planner.last_model
+
+                if (
+                    planner.last_provider != last_logged_provider
+                    or planner.last_model != last_logged_model
+                ):
+                    self._log(
+                        "Computer Use · provider fallback/route change → "
+                        f"{planner.last_provider}/{planner.last_model}"
+                    )
+                    last_logged_provider = planner.last_provider
+                    last_logged_model = planner.last_model
 
                 for batch_index, action in enumerate(actions):
                     if step > max_steps:

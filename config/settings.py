@@ -55,6 +55,11 @@ class AntonellaSettings(BaseSettings):
     openai_model_fast: str = "gpt-5.6-luna"
     openai_model_balanced: str = "gpt-5.6-terra"
     openai_model_expert: str = "gpt-5.6-sol"
+    gemini_model_fast: str = "gemini-flash-lite-latest"
+    gemini_model_balanced: str = "gemini-flash-latest"
+    gemini_model_expert: str = "gemini-flash-latest"
+    gemini_model_critic: str = "gemini-flash-latest"
+    gemini_model_vision: str = "gemini-flash-latest"
     computer_use_cost_mode: Literal["economy", "balanced", "quality"] = "economy"
 
     # -.-.-.-
@@ -84,6 +89,11 @@ class AntonellaSettings(BaseSettings):
         "openai_model_fast",
         "openai_model_balanced",
         "openai_model_expert",
+        "gemini_model_fast",
+        "gemini_model_balanced",
+        "gemini_model_expert",
+        "gemini_model_critic",
+        "gemini_model_vision",
         mode="before",
     )
     @classmethod
@@ -175,6 +185,11 @@ def load_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
             "openai_model_fast": settings.openai_model_fast,
             "openai_model_balanced": settings.openai_model_balanced,
             "openai_model_expert": settings.openai_model_expert,
+            "gemini_model_fast": settings.gemini_model_fast,
+            "gemini_model_balanced": settings.gemini_model_balanced,
+            "gemini_model_expert": settings.gemini_model_expert,
+            "gemini_model_critic": settings.gemini_model_critic,
+            "gemini_model_vision": settings.gemini_model_vision,
             "computer_use_cost_mode": settings.computer_use_cost_mode,
         }
     )
