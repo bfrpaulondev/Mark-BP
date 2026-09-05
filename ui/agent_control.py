@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer
@@ -50,13 +51,38 @@ _LABELS = {
 _COST_MODE_LABELS = {
     "economy": "Económico",
     "balanced": "Equilibrado",
-    "premium": "Premium",
+    "quality": "Qualidade",
 }
 
 
 # -.-.-.-
 def _font(size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
     return QFont("Segoe UI Variable", size, weight)
+
+
+# -.-.-.-
+def _format_cost(status: dict[str, Any]) -> tuple[str, str]:
+    mode = str(status.get("cost_mode") or "").lower()
+    mode_label = _COST_MODE_LABELS.get(mode, "—")
+    estimated = status.get("estimated_cost_usd")
+    complete = bool(status.get("cost_complete", False))
+    known = status.get("known_cost_usd")
+
+    if complete and estimated is not None:
+        try:
+            value = max(0.0, float(estimated))
+        except (TypeError, ValueError):
+            return mode_label, mode
+        return f"~US$ {value:.6f}", mode
+
+    try:
+        known_value = max(0.0, float(known or 0.0))
+    except (TypeError, ValueError):
+        known_value = 0.0
+    if known_value > 0:
+        return f"≥ US$ {known_value:.6f} · parcial", mode
+
+    return mode_label, mode
 
 
 class StatBox(QFrame):
@@ -90,8 +116,8 @@ class AgentControlDialog(QDialog):
     """Local control surface for the running Computer Use agent.
 
     Consumes only the fields published by the session's ``status()`` dict;
-    it never infers state from logs and never invents values (cost stays
-    "não disponível" until the runtime provides a real estimate).
+    it never infers state from logs and never invents values. Cost is shown
+    only from ANT-264 telemetry or as the selected cost mode fallback.
     """
 
     def __init__(self, host_window: Any):
@@ -156,8 +182,6 @@ class AgentControlDialog(QDialog):
         objective_layout.addWidget(self._objective)
         root.addWidget(objective_card)
 
-        # Honest progress: the session exposes no step total, so while the
-        # agent runs this is an indeterminate activity bar, never a fake %.
         self._progress = QProgressBar()
         self._progress.setTextVisible(False)
         self._progress.setFixedHeight(4)
@@ -187,8 +211,6 @@ class AgentControlDialog(QDialog):
         stats.addWidget(self._model, 2, 1)
         root.addLayout(stats)
 
-        # Progressive disclosure: capture evidence is technical detail; it
-        # stays hidden until asked for.
         self._details_toggle = QPushButton("▸ Detalhes técnicos")
         self._details_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self._details_toggle.setFont(_font(8, QFont.Weight.DemiBold))
@@ -274,8 +296,6 @@ class AgentControlDialog(QDialog):
 
     # -.-.-.-
     def _toggle_details(self) -> None:
-        # Explicit state, not isVisible(): a child of a hidden dialog reports
-        # isVisible() False even when explicitly shown.
         self._details_visible = not self._details_visible
         self._details_row.setVisible(self._details_visible)
         self._details_toggle.setText(
@@ -291,6 +311,7 @@ class AgentControlDialog(QDialog):
             self._notice.setText(str(result.get("error") or "Não foi possível parar o agente."))
         self.refresh()
 
+    # -.-.-.-
     def _approve(self) -> None:
         result = self._session.approve_once()
         if result.get("ok"):
@@ -300,6 +321,7 @@ class AgentControlDialog(QDialog):
             self._notice.setText(str(result.get("error") or "O agente não aguarda aprovação."))
         self.refresh()
 
+    # -.-.-.-
     def _write_host_log(self, text: str) -> None:
         try:
             self._host._log.append_event(text)
@@ -310,7 +332,7 @@ class AgentControlDialog(QDialog):
     def _set_progress(self, state: str) -> None:
         """Bounded progress presentation for the known-but-total-less step feed."""
         if state in _ACTIVE_STATES:
-            self._progress.setRange(0, 0)  # indeterminate: no total is published
+            self._progress.setRange(0, 0)
             self._progress.show()
         elif state == "done":
             self._progress.setRange(0, 1)
@@ -340,7 +362,7 @@ class AgentControlDialog(QDialog):
             return
         markup: list[str] = []
         for index, line in enumerate(history):
-            clean = str(line).replace("<", "&lt;")
+            clean = html.escape(str(line), quote=False)
             action, _, detail = clean.partition(": ")
             markup.append(
                 f'<p><span style="color:{_VIOLET_SOFT};">{index + 1:02d}</span> '
@@ -385,7 +407,10 @@ class AgentControlDialog(QDialog):
         self._saved_calls.set_value(str(saved), _GREEN if saved else _MUTED)
 
         target_window = str(status.get("target_window") or "").strip()
-        self._target_window.set_value(target_window[:48] if target_window else "—", _BLUE if target_window else _MUTED)
+        self._target_window.set_value(
+            target_window[:48] if target_window else "—",
+            _BLUE if target_window else _MUTED,
+        )
 
         requested = status.get("requested_monitor")
         resolved = status.get("monitor_index")
@@ -397,20 +422,27 @@ class AgentControlDialog(QDialog):
             display_text = "Auto"
         self._display.set_value(display_text, _BLUE)
 
-        cost_mode = str(status.get("cost_mode") or "").lower()
-        # Only the mode is published today; estimated cost arrives with
-        # ANT-264 cost telemetry and must never be fabricated here.
-        cost_text = _COST_MODE_LABELS.get(cost_mode, "—")
-        self._cost.set_value(cost_text, _GREEN if cost_mode == "economy" else (_BLUE if cost_mode == "balanced" else _MUTED))
+        cost_text, cost_mode = _format_cost(status)
+        cost_color = (
+            _GREEN
+            if status.get("cost_complete") and status.get("estimated_cost_usd") is not None
+            else _BLUE if cost_mode == "balanced" else _MUTED
+        )
+        self._cost.set_value(cost_text, cost_color)
 
         self._provider.set_value(str(status.get("provider") or "—"))
         self._model.set_value(str(status.get("model") or "—"))
 
         self._capture_scope.set_value(
-            "Janela" if str(status.get("capture_scope") or "monitor") == "window" else "Monitor completo", _BLUE
+            "Janela"
+            if str(status.get("capture_scope") or "monitor") == "window"
+            else "Monitor completo",
+            _BLUE,
         )
         savings = int(status.get("capture_savings_pct") or 0)
-        self._capture_savings.set_value(f"{savings}%", _GREEN if savings else _MUTED)
+        self._capture_savings.set_value(
+            f"{savings}%", _GREEN if savings else _MUTED
+        )
         self._visual_updates.set_value(str(int(status.get("visual_updates") or 0)))
         self._batched.set_value(str(int(status.get("batched_actions") or 0)))
 
@@ -424,12 +456,16 @@ class AgentControlDialog(QDialog):
         self._approve_button.setEnabled(state == "awaiting_approval")
         pending = str(status.get("last_action") or "").strip()
         if state == "awaiting_approval":
-            self._approve_button.setText(f"APROVAR: {pending[:38]}" if pending else "APROVAR 1 PASSO")
+            self._approve_button.setText(
+                f"APROVAR: {pending[:38]}" if pending else "APROVAR 1 PASSO"
+            )
         else:
             self._approve_button.setText("APROVAR 1 PASSO")
 
         if state == "awaiting_approval":
-            self._notice.setText(f"Aprovação necessária para: {pending or 'passo sensível'}")
+            self._notice.setText(
+                f"Aprovação necessária para: {pending or 'passo sensível'}"
+            )
         elif state == "failed":
             self._notice.setText(str(status.get("last_error") or "A tarefa falhou."))
         elif state == "done":
