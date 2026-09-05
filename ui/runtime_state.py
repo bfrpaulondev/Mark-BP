@@ -17,10 +17,11 @@ from typing import Any
 class UiState(StrEnum):
     """Canonical operational states rendered by the UI.
 
-    The first block follows the approved ANT-268 state vocabulary. The
-    legacy block keeps engine-emitted strings working unchanged until the
-    runtime migrates to the structured model (compatibility first, no
-    mass rename).
+    The first block follows the approved ANT-268 state vocabulary. UNKNOWN is
+    the conservative rendering state for malformed/unrecognised runtime values:
+    it must never silently appear as PRONTA/IDLE. The legacy block keeps
+    engine-emitted strings working unchanged until the runtime migrates to the
+    structured model (compatibility first, no mass rename).
     """
 
     # Canonical operational states
@@ -35,6 +36,7 @@ class UiState(StrEnum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+    UNKNOWN = "UNKNOWN"
 
     # Legacy compat states still emitted by the engines
     INITIALISING = "INITIALISING"
@@ -67,6 +69,7 @@ STATE_LABELS_PT: dict[UiState, str] = {
     UiState.COMPLETED: "CONCLUÍDO",
     UiState.FAILED: "FALHOU",
     UiState.CANCELLED: "CANCELADO",
+    UiState.UNKNOWN: "ESTADO INDISPONÍVEL",
     # Legacy states keep their established wording
     UiState.INITIALISING: "A INICIAR",
     UiState.SPEAKING: "A RESPONDER",
@@ -84,23 +87,24 @@ def state_label_pt(state: UiState) -> str:
 def normalize_state(value: UiState | str | None) -> UiState:
     """Normalize any engine-emitted state value into a UiState.
 
-    Total and fail-closed: unknown or empty values fall back to IDLE
-    instead of leaking raw strings into widget logic.
+    Total and conservative: unknown, empty or invalid values map to UNKNOWN
+    instead of leaking raw strings into widget logic or falsely implying that
+    Antonella is ready/idle.
     """
     if isinstance(value, UiState):
         return value
     if not isinstance(value, str):
-        return UiState.IDLE
+        return UiState.UNKNOWN
     text = value.strip().upper()
     if not text:
-        return UiState.IDLE
+        return UiState.UNKNOWN
     try:
         return UiState(text)
     except ValueError:
         pass
     if text in _LEGACY_ALIASES:
         return _LEGACY_ALIASES[text]
-    return UiState.IDLE
+    return UiState.UNKNOWN
 
 
 @dataclass(frozen=True)
