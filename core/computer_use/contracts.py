@@ -108,11 +108,6 @@ class SessionState:
     result: str = ""
     awaiting_approval: bool = False
     monitor_index: int | None = None
-    topology_token: str = ""
-    display_dpi: int = 96
-    display_scale_pct: int = 100
-    monitor_device: str = ""
-    monitor_primary: bool = False
     history: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -136,11 +131,6 @@ class SessionState:
             "result": self.result,
             "awaiting_approval": self.awaiting_approval,
             "monitor_index": self.monitor_index,
-            "topology_token": self.topology_token,
-            "display_dpi": self.display_dpi,
-            "display_scale_pct": self.display_scale_pct,
-            "monitor_device": self.monitor_device,
-            "monitor_primary": self.monitor_primary,
             "history": list(self.history[-12:]),
         }
 
