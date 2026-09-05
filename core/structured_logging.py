@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 import sys
 import uuid
@@ -230,8 +231,12 @@ def _redact(value: Any, *, key: str | None, depth: int, seen: set[int]) -> Any:
         return {"type": "bytes", "length": len(value)}
     if isinstance(value, str):
         return _redact_string(value)
-    if isinstance(value, (bool, int, float)) or value is None:
+    if isinstance(value, bool) or value is None:
         return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
     return _redact_string(type(value).__name__)
 
 
@@ -289,7 +294,12 @@ class AntonellaJsonFormatter(logging.Formatter):
             payload["exception"] = {
                 "type": getattr(exc_type, "__name__", "Exception")[:96]
             }
-        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
 
 
 class CorrelationFilter(logging.Filter):
