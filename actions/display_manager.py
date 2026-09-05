@@ -12,9 +12,8 @@ from core.display_selection import (
 from core.display_topology import (
     active_screen_point,
     describe_dpi_metadata,
-    monitor_metadata_by_index,
+    display_topology_state,
     per_monitor_dpi_context,
-    topology_token,
 )
 
 
@@ -41,8 +40,7 @@ def display_manager(
             with mss.mss() as sct:
                 monitors = list(sct.monitors)
         active_point = active_screen_point()
-        metadata = monitor_metadata_by_index(monitors)
-        token = topology_token(monitors, metadata)
+        metadata, token = display_topology_state(monitors)
 
         if action in {"list", "status"}:
             displays = describe_monitors(monitors, active_point=active_point)
