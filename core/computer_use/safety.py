@@ -26,6 +26,7 @@ _APPROVAL_PHRASES = {
     "remove",
     "erase",
     "uninstall",
+    "install",
     "format",
     "shutdown",
     "restart",
@@ -33,14 +34,19 @@ _APPROVAL_PHRASES = {
     "send",
     "submit",
     "publish",
+    "upload",
     "pay",
     "payment",
     "purchase",
     "buy",
+    "checkout",
+    "place order",
     "transfer",
     "wire",
     "trade",
     "sell",
+    "approve",
+    "allow",
     "grant access",
     "revoke access",
     "change permission",
@@ -55,6 +61,11 @@ _APPROVAL_PHRASES = {
     "security setting",
     "save changes",
     "confirm changes",
+    "sign in",
+    "log in",
+    "login",
+    "run",
+    "execute",
 }
 
 
@@ -68,6 +79,7 @@ def evaluate_action(action: ComputerAction) -> SafetyDecision:
             action.text,
             action.keys,
             action.result,
+            action.safety_context,
         )
         if part
     ).lower()
