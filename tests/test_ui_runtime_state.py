@@ -1,13 +1,23 @@
+import importlib.util
+import sys
 import unittest
 from pathlib import Path
 
-from ui.runtime_state import (
-    STATE_LABELS_PT,
-    UiRuntimeState,
-    UiState,
-    normalize_state,
-    state_label_pt,
+# CI runs isolated unit tests without PyQt6, so load runtime_state.py from
+# its file instead of importing the ui package (whose __init__ pulls in Qt).
+_ROOT = Path(__file__).resolve().parent.parent
+_spec = importlib.util.spec_from_file_location(
+    "antonella_runtime_state", _ROOT / "ui" / "runtime_state.py"
 )
+_module = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _module  # required by dataclass string annotations
+_spec.loader.exec_module(_module)
+
+STATE_LABELS_PT = _module.STATE_LABELS_PT
+UiRuntimeState = _module.UiRuntimeState
+UiState = _module.UiState
+normalize_state = _module.normalize_state
+state_label_pt = _module.state_label_pt
 
 
 class NormalizeStateTests(unittest.TestCase):
