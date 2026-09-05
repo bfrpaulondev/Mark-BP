@@ -40,8 +40,8 @@ quando não pode → informa claramente sem inventar sucesso
 
 - [x] **ANT-264 — Telemetria de custo por tarefa.** PR #43 integrada em `main`: usage provider-neutral, latência/retry/fallback, calls saved/cache hits, registry bounded/content-free e custo somente com pricing explícito configurado. Billing real do provider permanece fonte de verdade financeira.
 - [x] **ANT-265 — Cache e percepção local.** PR #45 integrada em `main` após principal review e CI Linux/Windows 3.11/3.12: frame/keyframe cache bounded/content-free, exact-digest classification, UIA-first apenas para primeiro click explícito/único/baixo risco, telemetria de chamadas poupadas e `safety_context` transitório que não entra em histórico/telemetria. E2E físico continua no ANT-275.
-- [ ] **ANT-266 — Hardening ScreenConnect.** Target-window locking/reacquisition, settle adaptativo, scroll verificável, recuperação, pause/resume/cancel e frames efémeros por default.
-- [ ] **ANT-267 — Melhorar Computer Use recovery.** Replanning quando UI muda, state tracking, bounded retries e evidência de conclusão.
+- [x] **ANT-266 — Cancelado como arquitectura específica.** A antiga tarefa “ScreenConnect hardening” foi removida por decisão de produto: Antonella deve usar o mesmo Computer Use genérico para qualquer UI visual. As capacidades úteis (target locking/reacquisition, settle, recovery, pause/resume/cancel) foram absorvidas no ANT-267; não existe uma dependência ScreenConnect no core.
+- [ ] **ANT-267 — Computer Use Reliability & Recovery.** PR #48 em principal review: recovery determinístico/bounded, target-window capture-scope fail-closed e reacquisition, stale-plan rejection, adaptive settle, um único retry automático apenas para scroll, pause/resume/stop e bloqueio de auto-aprovação via tool model-callable. Click/type/hotkey nunca são repetidos automaticamente. E2E físico continua no ANT-275.
 
 ## P1 — UI/UX e voz das áreas prontas
 
@@ -55,7 +55,7 @@ quando não pode → informa claramente sem inventar sucesso
 
 - [x] **ANT-273 — Windows CI, primeira fatia.** PR #40 integrada após principal review: Windows Python 3.11/3.12, compile/unit/import-smoke fail-closed e paridade essencial com Ubuntu. Ruff/typecheck/coverage/audits continuam como follow-ups; isto não substitui ANT-275 físico.
 - [ ] **ANT-274 — Structured logging completo.** Correlation/task ID, tool, provider/model, latência, custo, `verified`, erro/recovery e redaction; reduzir `print()` legado progressivamente.
-- [ ] **ANT-275 — Matriz E2E Windows real.** Voz, browser real, UIA, multi-monitor/DPI e ScreenConnect; distinguir sempre unit/integration/CI de E2E físico.
+- [ ] **ANT-275 — Matriz E2E Windows real.** Voz, browser real, UIA, Computer Use, multi-monitor/DPI e cenários visuais desconhecidos/remotos; distinguir sempre unit/integration/CI de E2E físico.
 
 ## P2 — inteligência persistente depois do core confiável
 
@@ -66,7 +66,7 @@ quando não pode → informa claramente sem inventar sucesso
 ## Ordem imediata de execução
 
 1. ANT-251–263 — execução verificável + core de agente integrados;
-2. ANT-264–267 — custo + percepção + Computer Use/ScreenConnect;
+2. ANT-264–267 — custo + percepção + Computer Use reliability genérico;
 3. ANT-268–272 — UI/voz/identidade em paralelo com GLM e principal review;
 4. ANT-273–275 — CI/observabilidade/E2E, com primeira fatia Windows CI já integrada;
 5. ANT-276–278 — memória/skills/tasks persistentes;
