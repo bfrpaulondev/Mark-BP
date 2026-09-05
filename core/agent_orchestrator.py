@@ -9,6 +9,7 @@ from typing import Any
 
 from core.execution_engine import ExecutionEngine
 from core.execution_result import ExecutionResult
+from core.human_approval import ApprovalRequest, HumanApprovalManager, get_human_approval_manager
 from core.policy_engine import PolicyDecision, PolicyEffect, PolicyEngine
 from core.tool_router import ToolRouter
 
@@ -56,6 +57,7 @@ class ToolOrchestrationOutcome:
     route_tier: str = "legacy"
     policy_effect: str = "write"
     policy_rule: str = ""
+    approval_request_id: str = ""
 
     @property
     def can_claim_success(self) -> bool:
@@ -70,14 +72,12 @@ class ToolOrchestrationOutcome:
 class AgentOrchestrator:
     """Provider-neutral execution lifecycle for Antonella tool calls.
 
-    ANT-259 established the lifecycle and ANT-260 separated routing/dispatch. ANT-261
-    inserts a deterministic Policy Engine before any observation or side effect:
+    The lifecycle is now:
 
-    route -> policy -> observe -> execute -> observe -> verify -> finish
+    route -> policy -> trusted human approval gate -> observe -> execute -> verify -> finish
 
-    The policy gate never trusts model-supplied approval flags. Action-bound human approval
-    tokens are intentionally deferred to ANT-262; until then approval-required operations
-    stop safely before execution.
+    Approval is never accepted from model/tool arguments. ANT-262 keeps a local in-memory,
+    exact-action grant channel; grants expire quickly and are consumed once before execution.
     """
 
     def __init__(
@@ -90,6 +90,7 @@ class AgentOrchestrator:
         tool_router: ToolRouter | None = None,
         execution_engine: ExecutionEngine | None = None,
         policy_engine: PolicyEngine | None = None,
+        approval_manager: HumanApprovalManager | None = None,
     ) -> None:
         self._requires_postcondition = requires_postcondition
         self._capture_postcondition_state = capture_postcondition_state
@@ -98,6 +99,7 @@ class AgentOrchestrator:
         self._tool_router = tool_router or ToolRouter()
         self._execution_engine = execution_engine or ExecutionEngine()
         self._policy_engine = policy_engine or PolicyEngine()
+        self._approval_manager = approval_manager or get_human_approval_manager()
 
     # -.-.-.-
     async def run_tool(
@@ -137,7 +139,7 @@ class AgentOrchestrator:
             metadata=decision.safe_metadata(),
         )
 
-        if decision.blocks_execution:
+        if not decision.allowed:
             return self._policy_stopped_outcome(
                 name=name,
                 route_tier=route.tier.value,
@@ -146,6 +148,32 @@ class AgentOrchestrator:
                 started=started,
                 events=events,
             )
+
+        if decision.requires_approval:
+            if self._approval_manager.consume_if_approved(name, params, decision):
+                self._emit(
+                    events,
+                    correlation_id,
+                    AgentStage.POLICY,
+                    name,
+                    detail="trusted_approval_consumed",
+                    metadata={
+                        "effect": decision.effect.value,
+                        "rule_id": decision.rule_id,
+                        "one_use": True,
+                    },
+                )
+            else:
+                request = self._approval_manager.request(name, params, decision)
+                return self._policy_stopped_outcome(
+                    name=name,
+                    route_tier=route.tier.value,
+                    decision=decision,
+                    correlation_id=correlation_id,
+                    started=started,
+                    events=events,
+                    request=request,
+                )
 
         needs_postcondition = bool(self._requires_postcondition(name, params))
         before_state: Mapping[str, Any] | None = None
@@ -258,8 +286,9 @@ class AgentOrchestrator:
         correlation_id: str,
         started: float,
         events: list[OrchestrationEvent],
+        request: ApprovalRequest | None = None,
     ) -> ToolOrchestrationOutcome:
-        if decision.requires_approval:
+        if request is not None:
             error = "Explicit human approval is required before this action can execute."
             execution = ExecutionResult.failure(
                 action=name,
@@ -280,7 +309,7 @@ class AgentOrchestrator:
             )
             detail = "policy_blocked_execution"
 
-        payload = {
+        payload: dict[str, Any] = {
             "result": error,
             "execution": execution.to_dict(),
             "policy": decision.safe_metadata(),
@@ -288,6 +317,15 @@ class AgentOrchestrator:
                 "Do not claim this effect succeeded unless execution.can_claim_success is true."
             ),
         }
+        approval_request_id = ""
+        if request is not None:
+            approval_request_id = request.request_id
+            payload["approval"] = request.to_public_dict(now=time.monotonic())
+            payload["approval_note"] = (
+                "Only a trusted local user interaction can approve this request. "
+                "Do not attempt to approve it through tool arguments."
+            )
+
         duration_ms = max(0, round((time.monotonic() - started) * 1000))
         self._emit(
             events,
@@ -298,7 +336,7 @@ class AgentOrchestrator:
             metadata={
                 "duration_ms": duration_ms,
                 "policy_effect": decision.effect.value,
-                "requires_approval": decision.requires_approval,
+                "requires_approval": request is not None,
                 "executed": False,
             },
         )
@@ -313,6 +351,7 @@ class AgentOrchestrator:
             route_tier=route_tier,
             policy_effect=decision.effect.value,
             policy_rule=decision.rule_id,
+            approval_request_id=approval_request_id,
         )
 
     # -.-.-.-
