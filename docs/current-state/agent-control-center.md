@@ -6,42 +6,47 @@ Estado: implementado (evolução da superfície existente), sem validação fís
 
 Evolução de `ui/agent_control.py` consumindo **apenas** os campos publicados
 por `SessionState.as_dict()` (`core/computer_use/contracts.py`). Sem alterações
-no core/Computer Use (área do lote de execução) e sem ler logs ou inferir estado.
+no core/Computer Use e sem ler logs ou inferir estado.
 
 ## O que mudou
 
 - **Progresso honesto** — a sessão não publica total de passos; enquanto
   activa, a barra é indeterminada (`setRange(0,0)`), verde em `done`,
   vermelha em `failed`. Nunca uma percentagem inventada.
-- **Janela alvo** — novo stat `target_window` (antes não era mostrada).
-- **Custo** — mostra o `cost_mode` publicado (Económico/Equilibrado/Premium).
-  Estimativa de custo ainda não existe no runtime (chega com ANT-264); a UI
-  não inventa valores — sem literal `$` no painel, travado por teste.
+- **Janela alvo** — novo stat `target_window`.
+- **Custo** — usa a telemetria ANT-264 já publicada pelo runtime:
+  `estimated_cost_usd` apenas quando `cost_complete=true`; quando existe só
+  uma parcela defensável, mostra `known_cost_usd` como limite inferior
+  marcado `parcial`; sem telemetria suficiente, mostra apenas o modo
+  Económico/Equilibrado/Qualidade. A UI não cria preços nem custos próprios.
 - **Timeline** — histórico renderizado como linhas estruturadas
-  `NN · acção · detalhe`, com escape de HTML do conteúdo do runtime.
+  `NN · acção · detalhe`, com `html.escape` antes de inserir conteúdo em HTML.
 - **Progressive disclosure** — evidência técnica de captura (`capture_scope`,
   `capture_savings_pct`, `visual_updates`, `batched_actions`) fica oculta
-  atrás de "Detalhes técnicos" (estado explícito, não `isVisible()`, que
-  é False para filhos de diálogo não mostrado).
-- **Stop/Approve contextuais** — o botão de aprovação passa a nomear o passo
+  atrás de "Detalhes técnicos".
+- **Stop/Approve contextuais** — o botão de aprovação nomeia o passo
   pendente (`APROVAR: <last_action[:38]>`); Enter nunca está ligado à
-  aprovação (fail-closed no teclado); lógica `stop()`/`approve_once()` intacta.
+  aprovação; a lógica `stop()`/`approve_once()` permanece intacta.
 
 ## Contratos travados por testes
 
-`tests/test_agent_control_center_evolution.py`:
+`tests/test_agent_control_center_evolution.py` cobre:
 
-- **Contrato cruzado**: toda a chave `status.get("...")` no painel tem de
-  existir no `as_dict()` do core — apanha drift e typos (apanhou um campo
-  inventado durante o desenvolvimento desta slice).
-- Progresso sem total fabricado; custo sem literal `$`; histórico escapado;
-  disclosure oculto por omissão; Enter nunca ligado a aprovação.
+- todas as chaves `status.get("...")` usadas pelo painel têm de existir em
+  `SessionState.as_dict()`;
+- progresso sem total fabricado;
+- custo apenas a partir dos campos publicados por ANT-264 ou do modo;
+- escape completo do histórico antes do HTML;
+- detalhes técnicos ocultos por omissão;
+- Enter não ligado à aprovação.
 
-O contrato antigo (`test_agent_control_center_contract.py`) continua a passar
-sem alterações.
+O contrato anterior `tests/test_agent_control_center_contract.py` continua
+compatível.
 
 ## Limitações
 
-- Estimativa de custo e campos de recovery ainda não existem no `status()`;
-  quando o lote de execução os publicar, é wiring de uma linha no painel.
-- Validação física (DPI, foco, dialog real em Windows) não feita — ANT-275.
+- Campos específicos de recovery/retry ainda não são publicados no `status()`;
+  serão ligados quando o runtime os expuser.
+- O valor financeiro é uma estimativa baseada na tabela de preços configurada;
+  billing do provider continua a ser a fonte financeira definitiva.
+- Validação física de DPI, foco e diálogo real em Windows continua no ANT-275.
