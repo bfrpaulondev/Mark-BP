@@ -9,6 +9,8 @@ class ProviderUsage:
     """Provider-neutral token usage returned by a completed model request.
 
     Counts are telemetry only. They never contain prompt, image or response content.
+    `billable_output_tokens` is provider-normalized for pricing: OpenAI output tokens
+    already include reasoning, while Gemini bills candidates plus thinking tokens.
     A zero value means the provider did not report that field, not that the field is
     guaranteed to have been free.
     """
@@ -18,6 +20,7 @@ class ProviderUsage:
     cached_input_tokens: int = 0
     reasoning_tokens: int = 0
     total_tokens: int = 0
+    billable_output_tokens: int = 0
 
     def __post_init__(self) -> None:
         for name in (
@@ -26,18 +29,17 @@ class ProviderUsage:
             "cached_input_tokens",
             "reasoning_tokens",
             "total_tokens",
+            "billable_output_tokens",
         ):
             value = max(0, int(getattr(self, name) or 0))
             object.__setattr__(self, name, value)
 
-        # Cached input is a subset of input for the providers we support. Clamp
-        # defensive SDK/API inconsistencies instead of producing negative billable input.
+        # Cached input is a subset of input. A cached count without any reported
+        # input total cannot safely be priced as a subset, so clamp it to zero.
         object.__setattr__(
             self,
             "cached_input_tokens",
-            min(self.cached_input_tokens, self.input_tokens)
-            if self.input_tokens
-            else self.cached_input_tokens,
+            min(self.cached_input_tokens, self.input_tokens),
         )
 
     @property
@@ -49,8 +51,18 @@ class ProviderUsage:
                 self.cached_input_tokens,
                 self.reasoning_tokens,
                 self.total_tokens,
+                self.billable_output_tokens,
             )
         )
+
+    @property
+    def priced_output_tokens(self) -> int:
+        """Tokens to apply the configured output rate to.
+
+        Legacy/custom adapters do not know this new field, so output_tokens remains
+        the compatibility fallback. Built-in adapters always set the normalized value.
+        """
+        return self.billable_output_tokens or self.output_tokens
 
     def safe_metadata(self) -> dict[str, int]:
         return {
@@ -59,6 +71,7 @@ class ProviderUsage:
             "cached_input_tokens": self.cached_input_tokens,
             "reasoning_tokens": self.reasoning_tokens,
             "total_tokens": self.total_tokens,
+            "billable_output_tokens": self.billable_output_tokens,
         }
 
 
