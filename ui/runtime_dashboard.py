@@ -184,7 +184,7 @@ class RuntimeDashboard(QWidget):
             live_accent = _PINK
         elif state == "LISTENING" and ready:
             live_value = "A escutar"
-        elif state in {"THINKING", "PROCESSING"} and ready:
+        elif state in {"THINKING", "PROCESSING", "EXECUTING", "VERIFYING", "RECOVERING"} and ready:
             live_value = "A processar"
         self._live.set_value(
             live_value,

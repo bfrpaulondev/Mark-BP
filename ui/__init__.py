@@ -14,6 +14,7 @@ from typing import Callable
 
 from config import get_config, get_gemini_key
 from config.settings import read_legacy_config, write_legacy_config
+from ui.runtime_state import STATE_LABELS_PT, UiRuntimeState, UiState, normalize_state
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
@@ -141,7 +142,7 @@ class ParticleOrb(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.state = "INITIALISING"
+        self.state = UiState.INITIALISING
         self.muted = False
         self.speaking = False
         self._phase = 0.0
@@ -176,22 +177,36 @@ class ParticleOrb(QWidget):
             )
         return particles
 
+    # Subtle per-state motion: (rotation speed, target energy). Bounded and
+    # event-driven in spirit — no extra timers, same 30 FPS tick as before.
+    _STATE_MOTION: dict[UiState, tuple[float, float]] = {
+        UiState.IDLE: (0.008, 0.15),
+        UiState.LISTENING: (0.010, 0.28),
+        UiState.THINKING: (0.014, 0.44),
+        UiState.OBSERVING: (0.012, 0.24),
+        UiState.EXECUTING: (0.018, 0.50),
+        UiState.VERIFYING: (0.012, 0.36),
+        UiState.RECOVERING: (0.010, 0.30),
+        UiState.WAITING_APPROVAL: (0.006, 0.40),
+        UiState.COMPLETED: (0.006, 0.20),
+        UiState.FAILED: (0.004, 0.12),
+        UiState.CANCELLED: (0.004, 0.10),
+        UiState.INITIALISING: (0.010, 0.16),
+        UiState.SPEAKING: (0.020, 0.62),
+        UiState.SLEEPING: (0.005, 0.10),
+        UiState.MUTED: (0.004, 0.05),
+    }
+
     def _tick(self) -> None:
-        speed = 0.020 if self.speaking else 0.008
-        if self.state in {"THINKING", "PROCESSING"}:
-            speed = 0.014
+        speed, target_energy = self._STATE_MOTION.get(self.state, (0.008, 0.15))
         self._phase += speed
 
         if self.muted:
             self._target_energy = 0.05
         elif self.speaking:
             self._target_energy = random.uniform(0.62, 0.92)
-        elif self.state in {"THINKING", "PROCESSING"}:
-            self._target_energy = 0.44
-        elif self.state == "LISTENING":
-            self._target_energy = 0.28
         else:
-            self._target_energy = 0.15
+            self._target_energy = target_energy
 
         self._energy += (self._target_energy - self._energy) * 0.08
         self.update()
@@ -256,16 +271,25 @@ class ParticleOrb(QWidget):
     def _state_label(self) -> tuple[str, str]:
         if self.muted:
             return "MICROFONE EM PAUSA", Palette.RED
-        states = {
-            "INITIALISING": ("A INICIAR", Palette.TEXT_MUTED),
-            "THINKING": ("A PENSAR", Palette.VIOLET_SOFT),
-            "PROCESSING": ("A EXECUTAR", Palette.VIOLET_SOFT),
-            "LISTENING": ("A ESCUTAR", Palette.VIOLET_SOFT),
-            "SPEAKING": ("A RESPONDER", Palette.PINK),
-            "SLEEPING": ("EM ESPERA", Palette.TEXT_FAINT),
-            "MUTED": ("MICROFONE EM PAUSA", Palette.RED),
+        colors = {
+            UiState.INITIALISING: Palette.TEXT_MUTED,
+            UiState.IDLE: Palette.TEXT_MUTED,
+            UiState.SLEEPING: Palette.TEXT_FAINT,
+            UiState.LISTENING: Palette.VIOLET_SOFT,
+            UiState.THINKING: Palette.VIOLET_SOFT,
+            UiState.OBSERVING: Palette.VIOLET_SOFT,
+            UiState.EXECUTING: Palette.VIOLET_SOFT,
+            UiState.VERIFYING: Palette.BLUE,
+            UiState.RECOVERING: Palette.BLUE,
+            UiState.WAITING_APPROVAL: Palette.PINK,
+            UiState.SPEAKING: Palette.PINK,
+            UiState.COMPLETED: Palette.GREEN,
+            UiState.FAILED: Palette.RED,
+            UiState.CANCELLED: Palette.TEXT_FAINT,
+            UiState.MUTED: Palette.RED,
         }
-        return states.get(self.state, (self.state, Palette.VIOLET_SOFT))
+        label = STATE_LABELS_PT.get(self.state, str(self.state))
+        return label, colors.get(self.state, Palette.VIOLET_SOFT)
 
 
 class LogView(QTextEdit):
@@ -364,6 +388,7 @@ class DropZone(QFrame):
 class AntonellaWindow(QMainWindow):
     _log_signal = pyqtSignal(str)
     _state_signal = pyqtSignal(str)
+    _runtime_state_signal = pyqtSignal(object)  # UiRuntimeState snapshot (thread-safe)
     _content_signal = pyqtSignal(str, str)
     _reconfig_signal = pyqtSignal()
     _camera_stream_signal = pyqtSignal(bool)
@@ -422,6 +447,7 @@ class AntonellaWindow(QMainWindow):
 
         self._log_signal.connect(self._log.append_event)
         self._state_signal.connect(self._apply_state)
+        self._runtime_state_signal.connect(self._apply_runtime_state)
         self._content_signal.connect(self._show_content)
         self._reconfig_signal.connect(self._configure_api_key)
         self._camera_stream_signal.connect(self._set_camera_mode)
@@ -662,11 +688,15 @@ class AntonellaWindow(QMainWindow):
             self._net_card.set_value("--")
 
     def _apply_state(self, state: str) -> None:
-        state = state.upper()
-        self.orb.state = state
-        self.orb.speaking = state == "SPEAKING"
+        """Legacy string entry point — normalized into the central state model."""
+        self._apply_runtime_state(UiRuntimeState(state=normalize_state(state)))
 
-        if state == "MUTED":
+    def _apply_runtime_state(self, snapshot: UiRuntimeState) -> None:
+        state = snapshot.state
+        self.orb.state = state
+        self.orb.speaking = state == UiState.SPEAKING
+
+        if state == UiState.MUTED:
             self._mic_button.setText("×")
             self._mic_button.setStyleSheet(
                 f"QPushButton{{background:#24111a;color:{Palette.RED};border:1px solid #4d2635;"
@@ -679,6 +709,15 @@ class AntonellaWindow(QMainWindow):
                 "font-weight:700;}"
                 f"QPushButton:hover{{background:{Palette.VIOLET_SOFT};}}"
             )
+
+        # CORE STATUS card mirrors the active task step when one is running.
+        if snapshot.current_step or snapshot.task_name:
+            detail = " · ".join(
+                part for part in (snapshot.task_name, snapshot.current_step) if part
+            )
+            self._core_card.set_value(f"⟐ {detail[:42]}")
+        else:
+            self._core_card.set_value("⟐ Sincronizado")
 
     def _show_content(self, title: str, text: str) -> None:
         self._content_title.setText(title.upper()[:60])
@@ -898,6 +937,12 @@ class JarvisUI:
 
     def set_state(self, state: str) -> None:
         self._win._state_signal.emit(state)
+
+    def set_runtime_state(self, state: UiRuntimeState | UiState | str) -> None:
+        """Push a structured runtime snapshot to the UI (ANT-268 contract)."""
+        if not isinstance(state, UiRuntimeState):
+            state = UiRuntimeState(state=normalize_state(state))
+        self._win._runtime_state_signal.emit(state)
 
     def write_log(self, text: str) -> None:
         self._win._log_signal.emit(text)
