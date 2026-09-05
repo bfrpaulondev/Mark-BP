@@ -21,13 +21,13 @@ _VISUAL_ACTIONS = {
 
 # -.-.-.-
 def _frame_topology_is_current(frame: FrameSnapshot) -> bool:
-    """Fail closed only when both captured and live topology identities are known and differ."""
+    """Require a captured token and a matching live topology before visual input."""
     captured = str(frame.topology_token or "").strip()
     if not captured:
-        return True
+        return False
     live = str(current_topology_token() or "").strip()
     if not live:
-        return True
+        return False
     return captured == live
 
 
@@ -47,7 +47,7 @@ def execute_action(
 
     if action.action in _VISUAL_ACTIONS and not _frame_topology_is_current(frame):
         return (
-            "Display topology changed after this frame was captured. Action was not dispatched; re-observe the desktop first.",
+            "Display topology could not be verified against this frame. Action was not dispatched; re-observe the desktop first.",
             True,
         )
 
