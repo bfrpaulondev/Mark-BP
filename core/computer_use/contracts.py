@@ -19,8 +19,20 @@ class FrameSnapshot:
     jpeg_bytes: bytes
     capture_scope: str = "monitor"
     pixel_savings: float = 0.0
+    topology_token: str = ""
+    dpi_x: int = 96
+    dpi_y: int = 96
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    monitor_device: str = ""
+    monitor_primary: bool = False
 
     def to_screen_coordinates(self, x: int, y: int) -> tuple[int, int]:
+        """Map model-image pixels directly into physical virtual-desktop pixels.
+
+        MSS captures physical pixels while the capture thread is per-monitor DPI aware,
+        so DPI metadata is descriptive and must not be multiplied into coordinates again.
+        """
         if self.image_width <= 0 or self.image_height <= 0:
             return self.left, self.top
         scaled_x = self.left + round((x / self.image_width) * self.monitor_width)
@@ -96,6 +108,11 @@ class SessionState:
     result: str = ""
     awaiting_approval: bool = False
     monitor_index: int | None = None
+    topology_token: str = ""
+    display_dpi: int = 96
+    display_scale_pct: int = 100
+    monitor_device: str = ""
+    monitor_primary: bool = False
     history: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -119,6 +136,11 @@ class SessionState:
             "result": self.result,
             "awaiting_approval": self.awaiting_approval,
             "monitor_index": self.monitor_index,
+            "topology_token": self.topology_token,
+            "display_dpi": self.display_dpi,
+            "display_scale_pct": self.display_scale_pct,
+            "monitor_device": self.monitor_device,
+            "monitor_primary": self.monitor_primary,
             "history": list(self.history[-12:]),
         }
 
