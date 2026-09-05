@@ -6,8 +6,8 @@ from datetime import datetime
 
 from config import get_config
 from core.local_command_router import execute_local_intent, parse_local_text_command
+from core.postcondition_verifiers import verify_postcondition
 from core.tool_verification_policy import requires_postcondition
-from core.verifier import verify_tool_result
 from google.genai import types
 from main import (
     TOOL_DECLARATIONS,
@@ -141,7 +141,7 @@ class AntonellaLive(JarvisLive):
         raw_result = payload.get("result")
         action_suffix = str(args.get("action") or "").strip()
         action_name = f"{name}.{action_suffix}" if action_suffix else name
-        execution = verify_tool_result(raw_result, action=action_name)
+        execution = verify_postcondition(name, args, raw_result)
         payload["execution"] = execution.to_dict()
         if not execution.can_claim_success:
             payload["verification_note"] = (
