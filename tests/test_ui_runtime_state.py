@@ -46,12 +46,13 @@ class NormalizeStateTests(unittest.TestCase):
         self.assertIs(normalize_state("MUTED"), UiState.MUTED)
         self.assertIs(normalize_state("INITIALISING"), UiState.INITIALISING)
 
-    def test_unknown_and_empty_values_fail_closed_to_idle(self):
-        self.assertIs(normalize_state(None), UiState.IDLE)
-        self.assertIs(normalize_state(""), UiState.IDLE)
-        self.assertIs(normalize_state("   "), UiState.IDLE)
-        self.assertIs(normalize_state("GARBAGE_STATE"), UiState.IDLE)
-        self.assertIs(normalize_state(123), UiState.IDLE)
+    def test_unknown_and_empty_values_do_not_claim_ready(self):
+        self.assertIs(normalize_state(None), UiState.UNKNOWN)
+        self.assertIs(normalize_state(""), UiState.UNKNOWN)
+        self.assertIs(normalize_state("   "), UiState.UNKNOWN)
+        self.assertIs(normalize_state("GARBAGE_STATE"), UiState.UNKNOWN)
+        self.assertIs(normalize_state(123), UiState.UNKNOWN)
+        self.assertNotEqual(normalize_state("GARBAGE_STATE"), UiState.IDLE)
 
 
 class StateLabelTests(unittest.TestCase):
@@ -74,6 +75,7 @@ class StateLabelTests(unittest.TestCase):
         self.assertEqual(state_label_pt(UiState.COMPLETED), "CONCLUÍDO")
         self.assertEqual(state_label_pt(UiState.FAILED), "FALHOU")
         self.assertEqual(state_label_pt(UiState.CANCELLED), "CANCELADO")
+        self.assertEqual(state_label_pt(UiState.UNKNOWN), "ESTADO INDISPONÍVEL")
 
 
 class UiRuntimeStateTests(unittest.TestCase):
@@ -90,6 +92,7 @@ class UiRuntimeStateTests(unittest.TestCase):
 
     def test_state_is_normalized_on_construction(self):
         self.assertIs(UiRuntimeState(state="processing").state, UiState.EXECUTING)
+        self.assertIs(UiRuntimeState(state="nonsense").state, UiState.UNKNOWN)
 
     def test_with_state_returns_moved_copy(self):
         base = UiRuntimeState(task_id="T1", task_name="Exportar")
