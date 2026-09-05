@@ -214,6 +214,44 @@ class WindowsUIAutomationTests(unittest.TestCase):
         self.assertTrue(payload["delivered"])
         self.assertFalse(payload["verified"])
 
+    def test_click_focus_and_foreground_changes_are_evidence_not_proof(self):
+        summary = ControlSummary(
+            name="Abrir",
+            control_type="Button",
+            automation_id="openButton",
+            class_name="Button",
+            enabled=True,
+            visible=True,
+            rectangle=None,
+        )
+        control = Mock()
+        window = SimpleNamespace(handle=42)
+        before = {
+            "control": summary.as_dict(),
+            "focused": False,
+            "selected": None,
+            "toggle_state": None,
+            "expand_state": None,
+            "value_length": None,
+            "_value": None,
+        }
+        after = {**before, "focused": True}
+
+        with patch("actions.windows_ui_automation._window_wrapper", return_value=window), \
+             patch("actions.windows_ui_automation._refind", side_effect=[(control, summary), (control, summary)]), \
+             patch("actions.windows_ui_automation._control_state", side_effect=[before, after]), \
+             patch("actions.windows_ui_automation._activate_control", return_value="invoked"), \
+             patch("actions.windows_ui_automation._foreground_handle", side_effect=[42, 99]):
+            payload = json.loads(
+                windows_ui_automation(
+                    {"action": "click", "automation_id": "openButton"}
+                )
+            )
+
+        self.assertTrue(payload["delivered"])
+        self.assertFalse(payload["verified"])
+        self.assertTrue(payload["evidence"]["foreground_changed"])
+
     def test_plugin_explicitly_precedes_visual_computer_use(self):
         description = PLUGIN["description"].lower()
 
