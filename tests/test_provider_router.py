@@ -6,6 +6,8 @@ from core.provider_router import (
     ProviderName,
     ProviderRole,
     ProviderRouter,
+    clear_provider_router_cache,
+    get_provider_router,
 )
 
 
@@ -76,7 +78,10 @@ class ProviderRouterPlanTests(unittest.TestCase):
 
     def test_auto_fast_prefers_gemini_for_low_cost_path(self):
         plan = self.router.candidate_plan(role="fast")
-        self.assertEqual([item.provider for item in plan], [ProviderName.GEMINI, ProviderName.OPENAI])
+        self.assertEqual(
+            [item.provider for item in plan],
+            [ProviderName.GEMINI, ProviderName.OPENAI],
+        )
         self.assertEqual(plan[0].model, "gm-fast")
 
     def test_auto_expert_and_critic_prefer_openai_specialist(self):
@@ -87,11 +92,14 @@ class ProviderRouterPlanTests(unittest.TestCase):
         self.assertEqual(critic[0].provider, ProviderName.OPENAI)
         self.assertEqual(critic[0].model, "oa-balanced")
 
-    def test_explicit_provider_preference_changes_primary_but_keeps_fallback(self):
+    def test_explicit_preference_means_prefer_and_keeps_fallback(self):
         plan = self.router.candidate_plan(role="expert", preference="gemini")
-        self.assertEqual([item.provider for item in plan], [ProviderName.GEMINI, ProviderName.OPENAI])
+        self.assertEqual(
+            [item.provider for item in plan],
+            [ProviderName.GEMINI, ProviderName.OPENAI],
+        )
 
-    def test_missing_preferred_provider_falls_back_to_configured_provider(self):
+    def test_missing_preferred_provider_uses_configured_fallback(self):
         router = ProviderRouter(
             self.config,
             adapters={"gemini": self.gemini},
@@ -105,7 +113,10 @@ class ProviderRouterPlanTests(unittest.TestCase):
 class ProviderRouterExecutionTests(unittest.TestCase):
     def test_transient_failure_retries_then_falls_back(self):
         openai = _FakeAdapter(
-            text_events=[RuntimeError("HTTP 503 unavailable"), RuntimeError("HTTP 503 unavailable")]
+            text_events=[
+                RuntimeError("HTTP 503 unavailable"),
+                RuntimeError("HTTP 503 unavailable"),
+            ]
         )
         gemini = _FakeAdapter(text_events=["fallback-answer"])
         sleeps = []
@@ -127,6 +138,23 @@ class ProviderRouterExecutionTests(unittest.TestCase):
         self.assertEqual(len(sleeps), 1)
         self.assertEqual([item.ok for item in result.attempts], [False, False, True])
         self.assertTrue(router.health_snapshot()["openai"]["circuit_open"])
+
+    def test_empty_response_is_not_recorded_as_success_before_retry(self):
+        openai = _FakeAdapter(text_events=["", "usable"])
+        router = ProviderRouter(
+            {},
+            adapters={"openai": openai},
+            sleeper=lambda _: None,
+        )
+
+        result = router.generate_text(prompt="task", role="expert")
+
+        self.assertEqual(result.text, "usable")
+        self.assertEqual(len(result.attempts), 2)
+        self.assertFalse(result.attempts[0].ok)
+        self.assertEqual(result.attempts[0].error_class, "empty_response")
+        self.assertTrue(result.attempts[0].retryable)
+        self.assertTrue(result.attempts[1].ok)
 
     def test_non_retryable_auth_failure_falls_back_without_retry(self):
         openai = _FakeAdapter(text_events=[RuntimeError("HTTP 401 invalid api key")])
@@ -165,7 +193,9 @@ class ProviderRouterExecutionTests(unittest.TestCase):
         openai = _FakeAdapter(
             text_events=[RuntimeError("HTTP 503 unavailable"), "recovered-openai"]
         )
-        gemini = _FakeAdapter(text_events=["first-fallback", "second-fallback"])
+        gemini = _FakeAdapter(
+            text_events=["first-fallback", "second-fallback"]
+        )
         router = ProviderRouter(
             {},
             adapters={"openai": openai, "gemini": gemini},
@@ -189,7 +219,9 @@ class ProviderRouterExecutionTests(unittest.TestCase):
         self.assertFalse(router.health_snapshot()["openai"]["circuit_open"])
 
     def test_success_after_transient_retry_resets_health(self):
-        openai = _FakeAdapter(text_events=[TimeoutError("timeout"), "ok-after-retry"])
+        openai = _FakeAdapter(
+            text_events=[TimeoutError("timeout"), "ok-after-retry"]
+        )
         router = ProviderRouter(
             {},
             adapters={"openai": openai},
@@ -204,7 +236,7 @@ class ProviderRouterExecutionTests(unittest.TestCase):
         self.assertEqual(health["consecutive_failures"], 0)
         self.assertEqual(health["last_error_class"], "")
 
-    def test_vision_uses_provider_adapter_without_serializing_image_in_metadata(self):
+    def test_vision_does_not_serialize_image_or_prompt_in_metadata(self):
         gemini = _FakeAdapter(vision_events=["screen-result"])
         router = ProviderRouter(
             {},
@@ -234,14 +266,58 @@ class ProviderRouterExecutionTests(unittest.TestCase):
         self.assertNotIn(secret, str(caught.exception))
         self.assertEqual(caught.exception.attempts, ())
 
+    def test_invalid_requests_stop_before_provider_dispatch(self):
+        adapter = _FakeAdapter()
+        router = ProviderRouter({}, adapters={"openai": adapter})
+
+        with self.assertRaises(ValueError):
+            router.generate_text(prompt="", role="fast")
+        with self.assertRaises(ValueError):
+            router.analyze_image(prompt="vision", image_bytes=b"")
+
+        self.assertEqual(adapter.text_calls, [])
+        self.assertEqual(adapter.vision_calls, [])
+
     def test_safe_health_snapshot_contains_no_credentials_or_prompt_data(self):
         router = ProviderRouter(
-            {"openai_api_key": "super-secret", "gemini_api_key": "other-secret"},
+            {
+                "openai_api_key": "super-secret",
+                "gemini_api_key": "other-secret",
+            },
             adapters={"openai": _FakeAdapter(), "gemini": _FakeAdapter()},
         )
         text = str(router.health_snapshot())
         self.assertNotIn("super-secret", text)
         self.assertNotIn("other-secret", text)
+
+
+class ProviderRouterCacheTests(unittest.TestCase):
+    def tearDown(self):
+        clear_provider_router_cache()
+
+    def test_same_runtime_configuration_reuses_health_router(self):
+        config = {
+            "openai_api_key": "key-one",
+            "openai_model_fast": "fast-one",
+        }
+        first = get_provider_router(config)
+        second = get_provider_router(dict(config))
+        self.assertIs(first, second)
+
+    def test_key_rotation_rebuilds_router_without_exposing_key(self):
+        first = get_provider_router({"openai_api_key": "key-one"})
+        second = get_provider_router({"openai_api_key": "key-two"})
+        self.assertIsNot(first, second)
+        self.assertNotIn("key-two", str(second.health_snapshot()))
+
+    def test_model_configuration_change_rebuilds_router(self):
+        first = get_provider_router(
+            {"openai_api_key": "key", "openai_model_fast": "one"}
+        )
+        second = get_provider_router(
+            {"openai_api_key": "key", "openai_model_fast": "two"}
+        )
+        self.assertIsNot(first, second)
 
 
 if __name__ == "__main__":
