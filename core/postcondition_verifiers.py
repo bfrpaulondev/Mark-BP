@@ -14,6 +14,16 @@ from core.desktop_postconditions import (
     verify_window_setting_postcondition,
 )
 from core.execution_result import ExecutionResult
+from core.file_postconditions import (
+    FILE_VERIFIABLE_ACTIONS,
+    capture_file_state,
+    verify_file_postcondition,
+)
+from core.settings_postconditions import (
+    SETTINGS_OBSERVABLE_ACTIONS,
+    capture_settings_state,
+    verify_settings_postcondition,
+)
 from core.verifier import verify_tool_result
 
 
@@ -189,6 +199,10 @@ def capture_postcondition_state(
         return capture_computer_input_state(action, params)
     if name == "computer_settings" and action in WINDOW_SETTING_ACTIONS:
         return capture_window_setting_state()
+    if name == "computer_settings" and action in SETTINGS_OBSERVABLE_ACTIONS:
+        return capture_settings_state(action)
+    if name == "file_controller" and action in FILE_VERIFIABLE_ACTIONS:
+        return capture_file_state(params)
     return {}
 
 
@@ -350,6 +364,21 @@ def verify_postcondition(
         return verify_window_setting_postcondition(
             action,
             before_state=before_state,
+        )
+
+    if name == "computer_settings" and action in SETTINGS_OBSERVABLE_ACTIONS and generic.delivered:
+        return verify_settings_postcondition(
+            action,
+            params,
+            before_state=before_state,
+            delivered=generic.delivered,
+        )
+
+    if name == "file_controller" and action in FILE_VERIFIABLE_ACTIONS and generic.delivered:
+        return verify_file_postcondition(
+            params,
+            before_state=before_state,
+            delivered=generic.delivered,
         )
 
     return generic
