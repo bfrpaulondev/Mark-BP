@@ -4,6 +4,8 @@ import platform
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from core.display_topology import per_monitor_dpi_context
+
 
 # -.-.-.-
 def normalize_rect(rect: Mapping[str, Any]) -> dict[str, int] | None:
@@ -94,7 +96,7 @@ def resolve_window_region(
     title_fragment: str,
     monitors: Sequence[Mapping[str, Any]],
 ) -> tuple[dict[str, int], int] | None:
-    """Resolve a visible Windows window to an MSS-safe region without taking a screenshot."""
+    """Resolve a visible Windows window to an MSS-safe physical-pixel region."""
     title_fragment = str(title_fragment or "").strip()
     if not title_fragment or platform.system() != "Windows":
         return None
@@ -126,49 +128,51 @@ def resolve_window_region(
         return None
 
     needle = title_fragment.casefold()
-    foreground = user32.GetForegroundWindow()
     candidates: list[tuple[int, int, dict[str, int]]] = []
 
-    def _collect(hwnd, _lparam):
+    with per_monitor_dpi_context():
+        foreground = user32.GetForegroundWindow()
+
+        def _collect(hwnd, _lparam):
+            try:
+                if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+                    return True
+
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length <= 0:
+                    return True
+
+                buffer = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buffer, length + 1)
+                title = buffer.value.strip()
+                if not title or needle not in title.casefold():
+                    return True
+
+                rect = wintypes.RECT()
+                if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                    return True
+
+                raw = {
+                    "left": int(rect.left),
+                    "top": int(rect.top),
+                    "width": int(rect.right - rect.left),
+                    "height": int(rect.bottom - rect.top),
+                }
+                clipped = clip_rect_to_desktop(raw, monitors)
+                if clipped is None or clipped["width"] < 120 or clipped["height"] < 80:
+                    return True
+
+                foreground_score = 1 if hwnd == foreground else 0
+                candidates.append((foreground_score, rect_area(clipped), clipped))
+            except Exception:
+                pass
+            return True
+
+        callback = EnumWindowsProc(_collect)
         try:
-            if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
-                return True
-
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length <= 0:
-                return True
-
-            buffer = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buffer, length + 1)
-            title = buffer.value.strip()
-            if not title or needle not in title.casefold():
-                return True
-
-            rect = wintypes.RECT()
-            if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                return True
-
-            raw = {
-                "left": int(rect.left),
-                "top": int(rect.top),
-                "width": int(rect.right - rect.left),
-                "height": int(rect.bottom - rect.top),
-            }
-            clipped = clip_rect_to_desktop(raw, monitors)
-            if clipped is None or clipped["width"] < 120 or clipped["height"] < 80:
-                return True
-
-            foreground_score = 1 if hwnd == foreground else 0
-            candidates.append((foreground_score, rect_area(clipped), clipped))
+            user32.EnumWindows(callback, 0)
         except Exception:
-            pass
-        return True
-
-    callback = EnumWindowsProc(_collect)
-    try:
-        user32.EnumWindows(callback, 0)
-    except Exception:
-        return None
+            return None
 
     if not candidates:
         return None

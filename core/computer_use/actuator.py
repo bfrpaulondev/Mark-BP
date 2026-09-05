@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from core.computer_use.contracts import ComputerAction, FrameSnapshot
+from core.display_topology import current_topology_token, per_monitor_dpi_context
 
 
 _VISUAL_ACTIONS = {
@@ -18,6 +19,19 @@ _VISUAL_ACTIONS = {
 }
 
 
+# -.-.-.-
+def _frame_topology_is_current(frame: FrameSnapshot) -> bool:
+    """Require a captured token and a matching live topology before visual input."""
+    captured = str(frame.topology_token or "").strip()
+    if not captured:
+        return False
+    live = str(current_topology_token() or "").strip()
+    if not live:
+        return False
+    return captured == live
+
+
+# -.-.-.-
 def execute_action(
     action: ComputerAction,
     frame: FrameSnapshot,
@@ -30,6 +44,12 @@ def execute_action(
 
     if action.action in {"done", "fail"}:
         return action.result or action.description or action.action, False
+
+    if action.action in _VISUAL_ACTIONS and not _frame_topology_is_current(frame):
+        return (
+            "Display topology could not be verified against this frame. Action was not dispatched; re-observe the desktop first.",
+            True,
+        )
 
     from actions.computer_control import computer_control
 
@@ -63,5 +83,6 @@ def execute_action(
     else:
         return f"Unsupported Computer Use action: {action.action}", False
 
-    result = computer_control(parameters=params, player=player)
+    with per_monitor_dpi_context():
+        result = computer_control(parameters=params, player=player)
     return str(result or "Done."), action.action in _VISUAL_ACTIONS
