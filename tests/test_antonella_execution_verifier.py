@@ -9,6 +9,11 @@ class AntonellaExecutionVerifierWiringTests(unittest.TestCase):
 
         self.assertIn("async def _execute_tool", source)
         self.assertIn("requires_postcondition", source)
+        self.assertIn("capture_postcondition_state", source)
+        self.assertLess(
+            source.index("capture_postcondition_state(name, args)"),
+            source.index("await super()._execute_tool(fc)"),
+        )
         self.assertIn("verify_postcondition", source)
         self.assertIn('payload["execution"] = execution.to_dict()', source)
         self.assertIn("execution.can_claim_success", source)
