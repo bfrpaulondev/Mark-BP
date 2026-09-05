@@ -24,9 +24,16 @@ from main import (
 )
 from ui import JarvisUI
 from ui.runtime_dashboard import attach_runtime_dashboard
+from ui.voice_feedback import local_command_feedback
 
 
 DEFAULT_VOICE = "Kore"
+
+# Deterministic fast-path kinds that deserve a short spoken confirmation;
+# informational kinds (help/status/list) stay log-only.
+_SPOKEN_LOCAL_KINDS = frozenset(
+    {"agent_stop", "agent_approve", "set_cost", "set_provider", "scroll", "open_app"}
+)
 
 
 class AntonellaLive(JarvisLive):
@@ -143,6 +150,7 @@ class AntonellaLive(JarvisLive):
             )
             result = execute_local_intent(intent, player=self.ui)
             message = result.message or "Comando local concluído."
+            verification = None
             if intent.kind == "open_app" and not result.verified:
                 verification = verify_open_app_postcondition(
                     app_name,
@@ -156,8 +164,14 @@ class AntonellaLive(JarvisLive):
                     message = f"Abri {app_name} e confirmei que a aplicação está em execução."
                 elif verification.error:
                     message = f"Tentei abrir {app_name}, mas não consegui confirmar: {verification.error}"
-            self.ui.write_log(f"{assistant_name}: {message}")
-            self._session_log.append(f"{assistant_name}: {message}")
+            feedback = local_command_feedback(result, verification)
+            self.ui.write_log(f"{assistant_name}: {feedback.phrase_pt}")
+            self._session_log.append(f"{assistant_name}: {feedback.phrase_pt}")
+            if intent.kind in _SPOKEN_LOCAL_KINDS:
+                # Spoken confirmation through the existing engine channel
+                # (no-op without a live session); phrase honesty is
+                # guaranteed by the voice feedback layer.
+                self.speak(feedback.phrase_pt)
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
 
