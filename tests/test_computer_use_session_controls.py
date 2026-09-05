@@ -2,13 +2,43 @@ from __future__ import annotations
 
 import unittest
 
-from core.computer_use.contracts import SessionState
+from core.computer_use.contracts import FrameSnapshot, SessionState
+from core.computer_use.recovery import RecoveryPolicy, RecoveryState
 from core.computer_use.session import RealtimeComputerUseSession
 
 
 class _AliveThread:
     def is_alive(self) -> bool:
         return True
+
+
+class _CaptureSequence:
+    def __init__(self, frames: list[FrameSnapshot]):
+        self._frames = list(frames)
+        self._index = 0
+
+    def latest(self, timeout: float = 0.0) -> FrameSnapshot:
+        frame = self._frames[min(self._index, len(self._frames) - 1)]
+        self._index += 1
+        return frame
+
+
+def _frame(sequence: int, scope: str) -> FrameSnapshot:
+    return FrameSnapshot(
+        sequence=sequence,
+        timestamp=1.0,
+        left=0,
+        top=0,
+        monitor_width=1280,
+        monitor_height=720,
+        image_width=1280,
+        image_height=720,
+        monitor_index=1,
+        change_score=0.2,
+        jpeg_bytes=b"x",
+        capture_scope=scope,
+        topology_token="topology-1",
+    )
 
 
 class ComputerUseSessionControlTests(unittest.TestCase):
@@ -65,6 +95,44 @@ class ComputerUseSessionControlTests(unittest.TestCase):
         result = inactive.pause()
         self.assertFalse(result["ok"])
         self.assertIn("No active", result["error"])
+
+    def test_target_reacquisition_waits_for_window_scope(self) -> None:
+        self.session._state.target_window = "Editor"
+        self.session._focus_target_window = lambda: "Focus requested"  # type: ignore[method-assign]
+        capture = _CaptureSequence(
+            [_frame(1, "monitor"), _frame(2, "monitor"), _frame(3, "window")]
+        )
+        recovery = RecoveryState()
+        policy = RecoveryPolicy(reacquire_timeout=1.0)
+
+        result = self.session._recover_target_window(
+            capture,
+            recovery,
+            policy,
+            reason="target scope lost",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual("window", result.capture_scope)
+        self.assertEqual(1, recovery.target_reacquisitions)
+        self.assertTrue(self.session.status()["target_locked"])
+
+    def test_target_reacquisition_stops_when_focus_fails(self) -> None:
+        self.session._state.target_window = "Editor"
+        self.session._focus_target_window = lambda: "focus_window failed: missing"  # type: ignore[method-assign]
+        recovery = RecoveryState()
+        policy = RecoveryPolicy(reacquire_timeout=1.0)
+
+        result = self.session._recover_target_window(
+            _CaptureSequence([_frame(1, "monitor")]),
+            recovery,
+            policy,
+            reason="target scope lost",
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(1, recovery.target_reacquisitions)
+        self.assertFalse(self.session.status()["target_locked"])
 
 
 if __name__ == "__main__":
