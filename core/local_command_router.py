@@ -7,6 +7,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.execution_result import ExecutionResult
+
 
 @dataclass(frozen=True)
 class LocalCommandIntent:
@@ -19,6 +21,7 @@ class LocalCommandResult:
     handled: bool
     kind: str = ""
     message: str = ""
+    verified: bool = False
 
 
 _COST_ALIASES = {
@@ -227,6 +230,22 @@ def local_command_help() -> str:
 
 
 # -.-.-.-
+def _legacy_side_effect_message(action: str, raw_result: object) -> LocalCommandResult:
+    """Do not turn a legacy 'no exception' string into a verified success claim."""
+    raw = str(raw_result or "").strip()
+    lowered = raw.lower()
+    if any(token in lowered for token in ("failed", "error", "could not", "not found")):
+        return LocalCommandResult(True, action, raw or "A acção local falhou.", False)
+
+    execution = ExecutionResult.unverified_delivery(
+        action,
+        evidence={"legacy_result": raw[:240]} if raw else {},
+        message="Acção enviada localmente; o efeito ainda não foi verificado.",
+    )
+    return LocalCommandResult(True, action, execution.message, execution.verified)
+
+
+# -.-.-.-
 def execute_local_intent(
     intent: LocalCommandIntent,
     *,
@@ -236,19 +255,19 @@ def execute_local_intent(
 
     try:
         if kind == "help":
-            return LocalCommandResult(True, kind, local_command_help())
+            return LocalCommandResult(True, kind, local_command_help(), True)
 
         if kind == "display_list":
             from actions.display_manager import display_manager
 
             raw = display_manager({"action": "list"})
-            return LocalCommandResult(True, kind, _format_display_list(raw))
+            return LocalCommandResult(True, kind, _format_display_list(raw), True)
 
         if kind == "agent_status":
             from core.computer_use import get_realtime_computer_use_session
 
             status = get_realtime_computer_use_session().status()
-            return LocalCommandResult(True, kind, _format_agent_status(status))
+            return LocalCommandResult(True, kind, _format_agent_status(status), True)
 
         if kind == "agent_stop":
             from core.computer_use import get_realtime_computer_use_session
@@ -259,7 +278,7 @@ def execute_local_intent(
                 if result.get("ok")
                 else str(result.get("error") or "Não consegui parar o agente.")
             )
-            return LocalCommandResult(True, kind, message)
+            return LocalCommandResult(True, kind, message, False)
 
         if kind == "agent_approve":
             from core.computer_use import get_realtime_computer_use_session
@@ -270,12 +289,12 @@ def execute_local_intent(
                 if result.get("ok")
                 else str(result.get("error") or "O agente não aguarda aprovação.")
             )
-            return LocalCommandResult(True, kind, message)
+            return LocalCommandResult(True, kind, message, bool(result.get("ok")))
 
         if kind == "system_status":
             from actions.system_monitor import get_system_status
 
-            return LocalCommandResult(True, kind, str(get_system_status()))
+            return LocalCommandResult(True, kind, str(get_system_status()), True)
 
         if kind == "set_cost":
             mode = str(intent.args.get("mode") or "economy")
@@ -285,25 +304,29 @@ def execute_local_intent(
                 "balanced": "equilibrado",
                 "quality": "qualidade",
             }
+            verified = os.environ.get("ANTONELLA_COMPUTER_USE_COST_MODE") == mode
             return LocalCommandResult(
                 True,
                 kind,
                 f"Modo de Computer Use alterado para {labels.get(mode, mode)}.",
+                verified,
             )
 
         if kind == "set_provider":
             provider = str(intent.args.get("provider") or "auto")
             os.environ["ANTONELLA_MODEL_PROVIDER_PREFERENCE"] = provider
+            verified = os.environ.get("ANTONELLA_MODEL_PROVIDER_PREFERENCE") == provider
             return LocalCommandResult(
                 True,
                 kind,
                 f"Preferência de provider alterada para {provider}.",
+                verified,
             )
 
         if kind == "scroll":
             from actions.computer_control import computer_control
 
-            result = computer_control(
+            raw = computer_control(
                 parameters={
                     "action": "scroll",
                     "direction": intent.args.get("direction", "down"),
@@ -311,24 +334,33 @@ def execute_local_intent(
                 },
                 player=player,
             )
-            return LocalCommandResult(True, kind, str(result or "Scroll concluído."))
+            return _legacy_side_effect_message("scroll", raw)
 
         if kind == "open_app":
             from actions.open_app import open_app
 
             app_name = str(intent.args.get("app_name") or "").strip()
-            result = open_app(
+            raw = open_app(
                 parameters={"app_name": app_name},
                 response=None,
                 player=player,
             )
-            return LocalCommandResult(True, kind, str(result or f"Abri {app_name}."))
+            result = _legacy_side_effect_message("open_app", raw)
+            if result.verified:
+                return result
+            return LocalCommandResult(
+                True,
+                kind,
+                f"Enviei o pedido para abrir {app_name}; ainda não verifiquei a janela.",
+                False,
+            )
 
     except Exception as exc:
         return LocalCommandResult(
             True,
             kind,
             f"Comando local falhou: {type(exc).__name__}: {str(exc)[:120]}",
+            False,
         )
 
     return LocalCommandResult(False)
