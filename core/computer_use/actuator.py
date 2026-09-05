@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from core.computer_use.contracts import ComputerAction, FrameSnapshot
+from core.display_topology import current_topology_token
 
 
 _VISUAL_ACTIONS = {
@@ -18,6 +19,19 @@ _VISUAL_ACTIONS = {
 }
 
 
+# -.-.-.-
+def _frame_topology_is_current(frame: FrameSnapshot) -> bool:
+    """Fail closed only when both captured and live topology identities are known and differ."""
+    captured = str(frame.topology_token or "").strip()
+    if not captured:
+        return True
+    live = str(current_topology_token() or "").strip()
+    if not live:
+        return True
+    return captured == live
+
+
+# -.-.-.-
 def execute_action(
     action: ComputerAction,
     frame: FrameSnapshot,
@@ -30,6 +44,12 @@ def execute_action(
 
     if action.action in {"done", "fail"}:
         return action.result or action.description or action.action, False
+
+    if action.action in _VISUAL_ACTIONS and not _frame_topology_is_current(frame):
+        return (
+            "Display topology changed after this frame was captured. Action was not dispatched; re-observe the desktop first.",
+            True,
+        )
 
     from actions.computer_control import computer_control
 
