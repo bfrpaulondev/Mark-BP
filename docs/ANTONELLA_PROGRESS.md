@@ -2,26 +2,42 @@
 
 > Painel operacional. O plano mestre continua a ser a fonte do escopo completo.
 
-**Última atualização:** 2026-09-04  
+**Última atualização:** 2026-09-05
 **Branch canónica:** `main`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | Realtime Computer Use + routing de custo |
+| Tarefa ativa | ANT-020/ANT-018 — arranque e diagnóstico real do runtime |
 | Pull requests abertas | Uma no máximo durante implementação |
 | Issues abertas | Nenhuma |
 | Próximo teste | Windows multi-monitor + ScreenConnect |
-| Próxima tarefa | Extrair mais routing/orquestração do `main.py` |
+| Próxima tarefa | Rever esta correção; depois autorização humana central das ferramentas legadas |
 
 ## Entregas integradas
 
 - PR #1–#11: roadmap, estabilização, config, dependências, testes, logging e doctor.
 - PR #12: nova UI Antonella + voz feminina.
 - PR #13: visão multi-monitor e identidade da sessão de visão.
+- PR #14–#22: Computer Use económico, especialista OpenAI, seleção de ecrãs, HUD, preferências, batching, painel do agente, captura por janela e controlo verificável de abas/rato.
 
-## Entrega em curso — Realtime Computer Use económico
+## Correção preparada — arranque e doctor
+
+Branch: `codex/ant-020-runtime-readiness`, baseada em `main@0366d6c`.
+Ainda não integrada; aguarda PR/CI/revisão.
+
+- README e instalador apontam para `antonella.py`.
+- Doctor usa o perfil Gemini Live, sem exigir os adaptadores legados Whisper/EdgeTTS.
+- Configuração inválida gera relatório sem repetir a leitura que lançava exceção.
+- Imports nativos e descoberta de microfone/altifalante são testados em subprocessos com timeout, sem gravar/reproduzir áudio e sem imprimir saídas potencialmente sensíveis.
+- Chromium ausente gera aviso; presença de chave não é apresentada como conectividade validada.
+- 115 testes unitários passaram em Python 3.11; compilação e `git diff --check` passaram.
+- E2E Windows, GUI renderizada, voz real, providers, browsers e ScreenConnect continuam não comprovados.
+- O gate de segurança do Computer Use não cobre todas as ferramentas legadas. Não classificar o protótipo como seguro para autonomia geral.
+- Preservar `codex/local-command-fast-path`: contém trabalho ainda não integrado.
+
+## Implementação integrada — Realtime Computer Use económico (E2E pendente)
 
 ### Perceção contínua local
 
