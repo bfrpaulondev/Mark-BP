@@ -114,11 +114,16 @@ def extract_gemini_usage(metadata: Any) -> ProviderUsage:
         "candidates_token_count",
         "candidatesTokenCount",
     )
+    reasoning_tokens = _usage_value(
+        metadata,
+        "thoughts_token_count",
+        "thoughtsTokenCount",
+    )
     total_tokens = _usage_value(
         metadata,
         "total_token_count",
         "totalTokenCount",
-    ) or (input_tokens + output_tokens)
+    ) or (input_tokens + output_tokens + reasoning_tokens)
 
     return ProviderUsage(
         input_tokens=input_tokens,
@@ -128,10 +133,9 @@ def extract_gemini_usage(metadata: Any) -> ProviderUsage:
             "cached_content_token_count",
             "cachedContentTokenCount",
         ),
-        reasoning_tokens=_usage_value(
-            metadata,
-            "thoughts_token_count",
-            "thoughtsTokenCount",
-        ),
+        reasoning_tokens=reasoning_tokens,
         total_tokens=total_tokens,
+        # Gemini pricing treats generated thinking tokens as output in addition
+        # to candidate/output tokens, so normalize that before generic costing.
+        billable_output_tokens=output_tokens + reasoning_tokens,
     )
