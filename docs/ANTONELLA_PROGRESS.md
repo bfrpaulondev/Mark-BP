@@ -4,22 +4,20 @@
 
 **Última atualização:** 2026-09-05
 **Branch canónica:** `main`
-**Main confirmado antes da PR #28:** `8558ce21a7e07e466198a706ed0cf90cef1c8bed`
+**Main confirmado:** `680c537e6d31244aceca444648315d82e1d596cf`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | ANT-255 — verificação de input desktop; fecha também o restante ANT-254 |
-| Branch de implementação | `codex/ant-255-input-verification` até integração da PR #28 |
-| Pull request | PR #28 — desktop input/window postconditions |
+| Tarefa ativa | ANT-256 — browser real verificável |
+| Branch de implementação | `codex/ant-256-browser-real-verification` |
+| Pull request | PR #29 — real browser windows/tabs |
 | Issues abertas | Nenhuma necessária para este trabalho |
-| Próximo teste real | Windows: Notepad/Chrome + click/scroll/type + window minimize/maximize/switch + multi-monitor + ScreenConnect |
-| Próxima tarefa após integração | ANT-256 — browser real verificável |
+| Próximo teste real | Windows: múltiplas janelas Chrome/Edge, tabs por título/URL e verificação da janela foreground |
+| Próximo bloco | continuar ANT-256 com CDP opcional/popups/downloads/SPA; depois ANT-257 |
 
 ## Prioridade aprovada em 2026-09-05
-
-O desenvolvimento horário prioriza elevar as áreas já prontas antes de aumentar escopo:
 
 1. ANT-251 — Local Fast Path;
 2. ANT-252/253 — `ExecutionResult` + Verifier central;
@@ -43,38 +41,39 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - PR #24: Local Fast Path + `ExecutionResult`; merge `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`; CI verde.
 - PR #25: Verifier central; merge `8b4371f15b312834743cdf08e07ad6a180d298ff`; fail-closed para side effects; CI verde.
 - PR #26: primeira slice `open_app`/focus; merge `6bd204892b3e72fb3ea8ed6f68f6497155f807e5`; CI verde.
-- PR #27: hardening de `open_app`; merge `8558ce21a7e07e466198a706ed0cf90cef1c8bed`; pre-state/delta real, launcher Windows sem `shell=True`, input tratado como dados; CI verde.
+- PR #27: hardening `open_app`; merge `8558ce21a7e07e466198a706ed0cf90cef1c8bed`; pre-state/delta real e launcher Windows sem `shell=True`; CI verde.
+- PR #28: desktop input/window postconditions; merge `680c537e6d31244aceca444648315d82e1d596cf`; ANT-254/255 cobertos por verificadores locais; CI verde em Python 3.11/3.12 e lock.
 
-## ANT-251–253 — concluídos
+## ANT-251–255 — integrados
 
 - comandos simples podem evitar um novo turno LLM;
 - `ExecutionResult` é o contrato canónico de `ok/delivered/verified/evidence/error/risk/requires_approval`;
-- `core/verifier.py` recusa inferir sucesso a partir de strings como `Done`, `Opened`, `Clicked`, `Typed` ou `Scrolled`;
-- `AntonellaLive._execute_tool` recolhe pre-state quando necessário e anexa `execution` autoritativo antes de devolver o resultado ao modelo.
+- `core/verifier.py` é fail-closed para resultados legacy;
+- `open_app`, focus/minimize/maximize/switch usam estado Windows quando disponível;
+- move/click/double/right/drag/scroll/hotkey/press/type/smart_type/paste/clear_field usam pre/post state e só permitem success claim quando a postcondition disponível prova o efeito;
+- texto real digitado e amostras visuais efémeras não são serializados na evidence.
 
-## ANT-254 — código fechado pela PR #28, E2E Windows pendente
+## ANT-256 — PR #29 em implementação
 
-- `open_app`: processos, janelas e foreground são capturados antes/depois; processo já existente não prova novo lançamento;
-- launcher Windows não usa shell para executáveis e restringe URI especial a `ms-settings:`;
-- `focus_window`: Win32 trata título como texto e confirma foreground;
-- `minimize`: só verifica quando a janela alvo passa a `IsIconic`;
-- `maximize`: só verifica quando a janela alvo passa a `IsZoomed`;
-- `switch_window`: exige mudança real do `HWND` foreground.
+Foi identificado um problema estrutural no browser legado: `go_to/search/new_tab` podem abrir o browser nativo do utilizador, mas interacções DOM posteriores podem criar uma sessão Playwright separada e navegar essa sessão para a última URL. `browser_control action='switch'` troca a sessão de automação, não uma tab real.
 
-## ANT-255 — implementado na PR #28
+A PR #29 adiciona `actions/real_browser_control.py` e liga-o ao `verified_desktop_control`:
 
-Novo `core/desktop_postconditions.py` adiciona observação local antes/depois para `computer_control`:
+- enumera janelas reais Chrome/Edge/Firefox/Opera/Brave/Vivaldi via Win32 + processo;
+- selecciona por browser, índice de janela ou título e prefere a janela foreground quando inequívoca;
+- múltiplas janelas/apps ambíguas não são adivinhadas;
+- foco de janela confirma o `HWND` foreground;
+- UIA enumera tabs e estado selected;
+- tabs podem ser escolhidas por índice ou título; quando UIA existe, índices >9 são suportados;
+- next/previous comparam fingerprint de title + URL + selected-tab;
+- `browser_switch_tab_url` percorre tabs UIA, lê a URL real, verifica o match e tenta restaurar a tab original quando nenhum match existe;
+- `browser_current` devolve o estado real actual;
+- clipboard usado para ler URL é restaurado;
+- o prompt proíbe criar uma sessão Playwright paralela apenas para listar/focar/trocar tabs/janelas já abertas.
 
-- `move`: cursor final tem de coincidir com o target;
-- `click/left_click/double_click/right_click`: target de cursor + mudança observável; sem efeito observável fica `verified=false`;
-- `drag`: endpoint + mudança observável;
-- `scroll`: mudança visual local do foreground window; scroll sem movimento observável fica não verificado;
-- `type/smart_type/paste/clear_field`: usa controlo focado UIA quando este expõe ValuePattern; conteúdo real é mantido apenas em memória e removido da evidence;
-- `hotkey/press`: foreground/focus/value/frame são comparados e só estados observáveis permitem claim;
-- amostras visuais são pequenas, grayscale, efémeras e nunca persistidas como screenshots;
-- plataformas/controls sem estado observável continuam fail-closed.
+A primeira CI da PR #29 revelou três regressões exclusivamente de testes/contrato: wording legado `verified boolean` e mocks sobre um objecto de plugin que podia ser recarregado pelo plugin loader. O wording foi preservado e os mocks passaram a usar `patch.object` sobre o objecto realmente importado. A CI seguinte tem de ficar verde antes do merge.
 
-Foram adicionados testes puros das transições e testes de wiring para garantir que `computer_control`/`computer_settings` passam pelo capturador/verifier. As primeiras execuções da CI da PR #28 passaram em Python 3.11, Python 3.12 e dependency lock; qualquer commit posterior de documentação deve voltar a ficar verde antes do merge.
+ANT-256 permanece aberta depois desta slice: CDP opcional para browsers que já estejam explicitamente em remote-debugging, popups/downloads e verificação SPA continuam pendentes. Não relançar silenciosamente o perfil real do utilizador com flags de debugging.
 
 ## Realtime Computer Use económico — integrado, E2E físico pendente
 
@@ -83,21 +82,19 @@ Foram adicionados testes puros das transições e testes de wiring para garantir
 - frame diff local e target-window ROI;
 - economy default, budgets, OpenAI opcional/fallback Gemini;
 - micro-batching conservador;
-- approvals de uso único dentro do Computer Use;
-- stop durante execução/espera de aprovação.
+- approvals de uso único e stop durante execução/espera.
 
 ## Validações e limites conhecidos
 
 - O utilizador confirmou smoke anterior de UI/voz/Notepad, mas as novas postconditions precisam de novo E2E Windows após actualizar a `main`.
 - Unit tests e CI Linux não provam Win32, UIA, áudio físico, DPI, multi-monitor ou ScreenConnect.
-- A verificação de click/drag/scroll é deliberadamente fail-closed quando não existe mudança observável suficiente.
-- Browser real e mouse movement já têm verificadores específicos da PR #22; ANT-256 vai consolidar browser por tabs/janelas/URL/CDP/UIA.
-- O código herdado ainda concentra responsabilidades em `main.py`; a extracção será incremental em ANT-259/260.
+- Um efeito sem estado observável suficiente permanece deliberadamente `verified=false`.
+- A extracção do `main.py` começa apenas depois do P0 ANT-254–258.
 
 ## Próxima sequência
 
-1. integrar PR #28 apenas se a CI final continuar verde;
-2. ANT-256 — browser real verificável;
+1. integrar PR #29 apenas com CI final verde;
+2. continuar ANT-256 com CDP opcional/popups/downloads/SPA;
 3. ANT-257 — multi-monitor/DPI hardening;
 4. ANT-258 — UIA/files/settings;
 5. ANT-259–263 — Orchestrator/Policy/Provider Router;
