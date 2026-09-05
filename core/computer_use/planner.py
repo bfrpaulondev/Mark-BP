@@ -6,7 +6,8 @@ from typing import Any, Mapping
 
 from core.computer_use.batching import MAX_ACTIONS_PER_PLAN, sanitize_action_batch
 from core.computer_use.contracts import ComputerAction, FrameSnapshot
-from core.cost_router import ModelRoute, select_visual_route
+from core.cost_router import ModelRoute, normalize_cost_mode, select_visual_route
+from core.provider_router import ProviderExhaustedError, ProviderRole, ProviderRouter
 
 
 _ALLOWED_ACTIONS = {
@@ -33,11 +34,24 @@ class ComputerUsePlanner:
         cost_mode: str = "economy",
     ):
         self._config = dict(config)
+        self._cost_mode = normalize_cost_mode(cost_mode)
         self.route: ModelRoute = select_visual_route(
             self._config,
-            cost_mode=cost_mode,
+            cost_mode=self._cost_mode,
         )
-        self.calls = 0
+        # Computer Use keeps a session-local health state. One attempt per
+        # provider is enough here because a fresh frame/replan is usually more
+        # useful than repeatedly sending the same screenshot to one provider.
+        self._provider_router = ProviderRouter(
+            self._config,
+            max_attempts_per_provider=1,
+        )
+        self.calls = 0  # logical planning turns (compatibility + budget)
+        self.provider_attempts = 0  # actual provider requests, including fallback
+        self.fallbacks = 0
+        self.last_provider = self.route.provider
+        self.last_model = self.route.model
+        self.last_fallback_count = 0
 
     def next_actions(
         self,
@@ -67,14 +81,32 @@ class ComputerUsePlanner:
         )
         self.calls += 1
 
-        if self.route.provider == "openai":
-            raw = self._openai(prompt, frame)
-        elif self.route.provider == "gemini":
-            raw = self._gemini(prompt, frame)
-        else:
-            raise RuntimeError(f"Unsupported provider: {self.route.provider}")
+        try:
+            result = self._provider_router.analyze_image(
+                prompt=prompt,
+                image_bytes=frame.jpeg_bytes,
+                mime_type="image/jpeg",
+                detail=self.route.budget.image_detail,
+                role=_provider_role_for_cost_mode(self._cost_mode.value),
+                # Preserve the existing cost-router decision as the primary
+                # provider while still allowing the configured fallback.
+                preference=self.route.provider,
+            )
+        except ProviderExhaustedError as exc:
+            self.provider_attempts += len(exc.attempts)
+            self.last_fallback_count = 0
+            return [
+                _fail_action(
+                    "Visual planner providers were unavailable or rejected the request."
+                )
+            ]
 
-        return _parse_actions(raw)
+        self.provider_attempts += len(result.attempts)
+        self.fallbacks += result.fallback_count
+        self.last_fallback_count = result.fallback_count
+        self.last_provider = result.provider
+        self.last_model = result.model
+        return _parse_actions(result.text)
 
     def next_action(
         self,
@@ -92,41 +124,14 @@ class ComputerUsePlanner:
             step=step,
         )[0]
 
-    def _openai(self, prompt: str, frame: FrameSnapshot) -> str:
-        from core.providers.openai_responses import OpenAIResponsesClient
 
-        client = OpenAIResponsesClient(
-            str(self._config.get("openai_api_key") or "")
-        )
-        return client.analyze_image(
-            model=self.route.model,
-            prompt=prompt,
-            image_bytes=frame.jpeg_bytes,
-            mime_type="image/jpeg",
-            detail=self.route.budget.image_detail,
-            reasoning_effort=self.route.reasoning_effort,
-        )
-
-    def _gemini(self, prompt: str, frame: FrameSnapshot) -> str:
-        from google import genai
-        from google.genai import types as gtypes
-
-        api_key = str(self._config.get("gemini_api_key") or "").strip()
-        if not api_key:
-            raise RuntimeError("Gemini API key is not configured.")
-
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=self.route.model,
-            contents=[
-                gtypes.Part.from_bytes(
-                    data=frame.jpeg_bytes,
-                    mime_type="image/jpeg",
-                ),
-                prompt,
-            ],
-        )
-        return str(response.text or "").strip()
+def _provider_role_for_cost_mode(cost_mode: str) -> ProviderRole:
+    normalized = str(cost_mode or "economy").strip().lower()
+    if normalized == "quality":
+        return ProviderRole.EXPERT
+    if normalized == "balanced":
+        return ProviderRole.BALANCED
+    return ProviderRole.FAST
 
 
 def _build_prompt(
