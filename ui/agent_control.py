@@ -4,7 +4,7 @@ import html
 from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeyEvent
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -84,6 +84,22 @@ def _format_cost(status: dict[str, Any]) -> tuple[str, str]:
         return f"≥ US$ {known_value:.6f} · parcial", mode
 
     return mode_label, mode
+
+
+class ApprovalButton(QPushButton):
+    """Approval control that never treats Enter or Return as activation.
+
+    Keyboard navigation remains available and Space keeps the normal Qt
+    push-button activation semantics. This avoids a generic confirmation key
+    granting a one-use sensitive approval while preserving accessibility.
+    """
+
+    # -.-.-.-
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class StatBox(QFrame):
@@ -256,7 +272,7 @@ class AgentControlDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self._approve_button = QPushButton("APROVAR 1 PASSO")
+        self._approve_button = ApprovalButton("APROVAR 1 PASSO")
         self._stop_button = QPushButton("PARAR AGENTE")
         close_button = QPushButton("Fechar")
 
@@ -285,8 +301,9 @@ class AgentControlDialog(QDialog):
         )
 
         # A QDialog turns plain QPushButtons into auto-default targets for
-        # Return/Enter. Approval must never fire from a keyboard default;
-        # only an explicit click (mouse, Space on the focused button) does.
+        # Return/Enter. Approval must never fire from a keyboard default, and
+        # ApprovalButton also consumes those keys when it owns focus. Mouse
+        # click and Space on the focused enabled control remain explicit paths.
         for button in (self._approve_button, self._stop_button, close_button):
             button.setAutoDefault(False)
             button.setDefault(False)
