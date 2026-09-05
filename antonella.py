@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 
 from config import get_config
+from core.local_command_router import execute_local_intent, parse_local_text_command
 from google.genai import types
 from main import (
     TOOL_DECLARATIONS,
@@ -89,6 +90,37 @@ class AntonellaLive(JarvisLive):
             live_config["proactivity"] = types.ProactivityConfig(proactive_audio=True)
 
         return types.LiveConnectConfig(**live_config)
+
+    # -.-.-.-
+    def _on_text_command(self, text: str) -> None:
+        """Use deterministic local actions before paying for a Live model turn."""
+        intent = parse_local_text_command(text)
+        if intent is None:
+            super()._on_text_command(text)
+            return
+
+        user_text = str(text or "").strip()
+        assistant_name = (
+            str(get_config().get("assistant_name") or "Antonella").strip() or "Antonella"
+        )
+        self.ui.write_log(f"You: {user_text}")
+        self.ui.write_log(f"SYS: fast path local · {intent.kind}")
+        self.ui.set_state("PROCESSING")
+        self._session_log.append(f"User: {user_text}")
+
+        def _execute() -> None:
+            result = execute_local_intent(intent, player=self.ui)
+            message = result.message or "Comando local concluído."
+            self.ui.write_log(f"{assistant_name}: {message}")
+            self._session_log.append(f"{assistant_name}: {message}")
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+
+        threading.Thread(
+            target=_execute,
+            daemon=True,
+            name=f"antonella-local-{intent.kind}",
+        ).start()
 
     # -.-.-.-
     def speak_error(self, tool_name: str, error: str) -> None:
