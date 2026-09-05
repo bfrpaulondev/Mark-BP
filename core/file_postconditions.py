@@ -9,7 +9,19 @@ from core.execution_result import ExecutionResult
 
 
 _FILE_HASH_LIMIT = 8 * 1024 * 1024
+_FILE_SAMPLE_SIZE = 256 * 1024
 _DIR_ENTRY_LIMIT = 256
+
+FILE_VERIFIABLE_ACTIONS = {
+    "create_file",
+    "create_folder",
+    "delete",
+    "move",
+    "copy",
+    "rename",
+    "write",
+    "organize_desktop",
+}
 
 
 # -.-.-.-
@@ -50,13 +62,18 @@ def _rename_path(args: Mapping[str, Any], source: Path | None) -> Path | None:
 
 # -.-.-.-
 def _file_digest(path: Path, size: int) -> str:
-    if size < 0 or size > _FILE_HASH_LIMIT:
-        return ""
     digest = hashlib.sha256()
     try:
         with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(128 * 1024), b""):
-                digest.update(chunk)
+            if 0 <= size <= _FILE_HASH_LIMIT:
+                for chunk in iter(lambda: handle.read(128 * 1024), b""):
+                    digest.update(chunk)
+            else:
+                digest.update(handle.read(_FILE_SAMPLE_SIZE))
+                if size > _FILE_SAMPLE_SIZE:
+                    handle.seek(max(0, size - _FILE_SAMPLE_SIZE))
+                    digest.update(handle.read(_FILE_SAMPLE_SIZE))
+                digest.update(str(size).encode("ascii", errors="ignore"))
         return digest.hexdigest()
     except Exception:
         return ""
@@ -123,6 +140,12 @@ def _snapshot(path: Path | None) -> dict[str, Any]:
 
 
 # -.-.-.-
+def _snapshot_from_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = str((state or {}).get("_path") or "").strip()
+    return _snapshot(Path(raw)) if raw else {}
+
+
+# -.-.-.-
 def _public(state: Mapping[str, Any] | None) -> dict[str, Any]:
     return {
         str(key): value
@@ -142,14 +165,12 @@ def _same_object(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
             return False
         before_hash = str(before.get("sha256") or "")
         after_hash = str(after.get("sha256") or "")
-        return bool(before_hash and after_hash and before_hash == after_hash) or (
-            not before_hash and not after_hash
-        )
+        return bool(before_hash and after_hash and before_hash == after_hash)
     if before.get("kind") == "directory":
         before_hash = str(before.get("tree_sha256") or "")
         after_hash = str(after.get("tree_sha256") or "")
         return bool(before_hash and after_hash and before_hash == after_hash)
-    return True
+    return False
 
 
 # -.-.-.-
@@ -192,16 +213,21 @@ def verify_file_postcondition(
         return ExecutionResult.failure(result_action, "Filesystem operation was not delivered.")
 
     before = dict(before_state or {})
-    after = capture_file_state(params)
+    if not before:
+        return ExecutionResult.unverified_delivery(
+            result_action,
+            message="Filesystem command was delivered, but no pre-action filesystem state was captured.",
+        )
+
     before_source = before.get("source") if isinstance(before.get("source"), Mapping) else {}
     before_dest = before.get("destination") if isinstance(before.get("destination"), Mapping) else {}
-    after_source = after.get("source") if isinstance(after.get("source"), Mapping) else {}
-    after_dest = after.get("destination") if isinstance(after.get("destination"), Mapping) else {}
+    after_source = _snapshot_from_state(before_source)
+    after_dest = _snapshot_from_state(before_dest)
     evidence = {
         "before_source": _public(before_source),
         "after_source": _public(after_source),
     }
-    if before_dest or after_dest:
+    if before_dest:
         evidence["before_destination"] = _public(before_dest)
         evidence["after_destination"] = _public(after_dest)
 
@@ -232,7 +258,12 @@ def verify_file_postcondition(
 
     elif action == "write":
         if not after_source.get("exists") or after_source.get("kind") != "file":
-            return ExecutionResult.failure(result_action, "Target file was not present after write.", delivered=True, evidence=evidence)
+            return ExecutionResult.failure(
+                result_action,
+                "Target file was not present after write.",
+                delivered=True,
+                evidence=evidence,
+            )
         content_bytes = str(params.get("content") or "").encode("utf-8")
         actual_size = int(after_source.get("size") or 0)
         if bool(params.get("append", False)):
@@ -245,19 +276,14 @@ def verify_file_postcondition(
             evidence["expected_size"] = len(content_bytes)
             digest = str(after_source.get("sha256") or "")
             expected_digest = hashlib.sha256(content_bytes).hexdigest()
-            if actual_size == len(content_bytes) and (not digest or digest == expected_digest):
+            if actual_size == len(content_bytes) and digest == expected_digest:
                 return ExecutionResult.verified_success(result_action, evidence=evidence)
 
     elif action == "delete":
         if before_source.get("exists") and not after_source.get("exists"):
             return ExecutionResult.verified_success(result_action, evidence=evidence)
 
-    elif action == "rename":
-        if before_source.get("exists") and not after_source.get("exists") and after_dest.get("exists"):
-            if _same_object(before_source, after_dest):
-                return ExecutionResult.verified_success(result_action, evidence=evidence)
-
-    elif action == "move":
+    elif action in {"rename", "move"}:
         if before_source.get("exists") and not after_source.get("exists") and after_dest.get("exists"):
             if _same_object(before_source, after_dest):
                 return ExecutionResult.verified_success(result_action, evidence=evidence)
