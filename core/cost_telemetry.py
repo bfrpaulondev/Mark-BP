@@ -107,6 +107,8 @@ def _safe_task_id(value: str | None) -> str:
         return uuid.uuid4().hex[:16]
     if _SAFE_TASK_ID_RE.fullmatch(raw):
         return raw
+    # Task IDs are identifiers, not a storage channel. Preserve correlation for
+    # arbitrary caller strings through a deterministic digest without retaining text.
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
     return f"task-{digest}"
 
@@ -160,7 +162,13 @@ def resolve_model_pricing(
     provider: str,
     model: str,
 ) -> ModelPricing | None:
-    """Resolve an explicitly configured price without network calls or defaults."""
+    """Resolve an explicitly configured price without network calls or defaults.
+
+    Supported table keys are `provider/model` (preferred) and bare `model` for
+    convenience. Values are USD per one million tokens with keys `input`,
+    `output` and optional `cached_input`.
+    """
+
     if not isinstance(config, Mapping):
         return None
     table = config.get("model_pricing_usd_per_million_tokens")
@@ -181,6 +189,7 @@ def estimate_usage_cost_usd(
     pricing: ModelPricing | None,
 ) -> float | None:
     """Return a defensible estimate or None when required information is absent."""
+
     if usage is None or not usage.has_usage or pricing is None:
         return None
 
@@ -189,6 +198,8 @@ def estimate_usage_cost_usd(
     cached_tokens = min(input_tokens, max(0, int(usage.cached_input_tokens)))
     uncached_tokens = max(0, input_tokens - cached_tokens)
 
+    # A provider reporting only total_tokens gives too little information to
+    # apply separate input/output rates safely.
     if not input_tokens and not priced_output_tokens:
         return None
     if uncached_tokens and pricing.input_per_million is None:
