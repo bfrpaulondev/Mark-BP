@@ -46,6 +46,7 @@ class OrchestrationEvent:
 class ToolOrchestrationOutcome:
     correlation_id: str
     tool_name: str
+    raw_response: Any
     response_payload: dict[str, Any]
     execution: ExecutionResult | None
     events: tuple[OrchestrationEvent, ...]
@@ -206,6 +207,7 @@ class AgentOrchestrator:
         return ToolOrchestrationOutcome(
             correlation_id=correlation_id,
             tool_name=name,
+            raw_response=raw_response,
             response_payload=payload,
             execution=execution,
             events=tuple(events),
