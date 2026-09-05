@@ -24,12 +24,16 @@ class ProviderUsageExtractionTests(unittest.TestCase):
         self.assertEqual(usage.output_tokens, 35)
         self.assertEqual(usage.reasoning_tokens, 12)
         self.assertEqual(usage.total_tokens, 155)
+        # OpenAI reasoning is already a subset of output_tokens.
+        self.assertEqual(usage.billable_output_tokens, 35)
+        self.assertEqual(usage.priced_output_tokens, 35)
 
     def test_openai_usage_derives_total_when_api_omits_it(self):
         usage = extract_openai_usage(
             {"usage": {"input_tokens": 10, "output_tokens": 4}}
         )
         self.assertEqual(usage.total_tokens, 14)
+        self.assertEqual(usage.billable_output_tokens, 4)
 
     def test_gemini_usage_supports_sdk_attribute_shape(self):
         metadata = SimpleNamespace(
@@ -46,6 +50,9 @@ class ProviderUsageExtractionTests(unittest.TestCase):
         self.assertEqual(usage.cached_input_tokens, 75)
         self.assertEqual(usage.reasoning_tokens, 20)
         self.assertEqual(usage.total_tokens, 250)
+        # Gemini prices thinking in addition to candidate/output tokens.
+        self.assertEqual(usage.billable_output_tokens, 70)
+        self.assertEqual(usage.priced_output_tokens, 70)
 
     def test_gemini_usage_supports_serialized_camel_case_shape(self):
         usage = extract_gemini_usage(
@@ -61,7 +68,8 @@ class ProviderUsageExtractionTests(unittest.TestCase):
         self.assertEqual(usage.output_tokens, 10)
         self.assertEqual(usage.cached_input_tokens, 5)
         self.assertEqual(usage.reasoning_tokens, 3)
-        self.assertEqual(usage.total_tokens, 40)
+        self.assertEqual(usage.total_tokens, 43)
+        self.assertEqual(usage.billable_output_tokens, 13)
 
     def test_missing_usage_is_explicitly_empty(self):
         self.assertFalse(extract_openai_usage({}).has_usage)
