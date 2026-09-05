@@ -4,14 +4,14 @@
 
 **Última atualização:** 2026-09-05
 **Branch canónica:** `main`
-**Main confirmado:** `8b4371f15b312834743cdf08e07ad6a180d298ff`
+**Main confirmado:** `6bd204892b3e72fb3ea8ed6f68f6497155f807e5`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
 | Tarefa ativa | ANT-254 — verificação de aplicações/janelas |
-| Branch ativa | `codex/verified-app-window-effects` |
+| Branch ativa | `codex/ant-254-open-app-hardening` |
 | Pull requests abertas | abrir apenas esta implementação quando reviewable |
 | Issues abertas | Nenhuma necessária para este trabalho |
 | Próximo teste real | Windows: abrir Bloco de Notas/Chrome + focus + browser/rato + multi-monitor + ScreenConnect |
@@ -42,6 +42,7 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - PR #23: runtime-readiness; merge `2952eb9c26f4c04b8dbd6e945daf2395eebe6107`; CI verde em Python 3.11/3.12 e lock.
 - PR #24: Reliability Hardening Wave 1; merge `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`; ANT-251 Local Fast Path + ANT-252 `ExecutionResult`; CI verde.
 - PR #25: Verifier central; merge `8b4371f15b312834743cdf08e07ad6a180d298ff`; respostas side-effecting recebem `execution` autoritativo e claims ficam fail-closed; CI verde em Python 3.11/3.12 e lock.
+- PR #26: primeira slice de postconditions para `open_app` e foco; merge `6bd204892b3e72fb3ea8ed6f68f6497155f807e5`; CI final verde após corrigir os testes em Python 3.11/3.12.
 
 ## ANT-251 — concluído e integrado
 
@@ -60,17 +61,21 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 
 ## ANT-254 — em implementação
 
-A branch `codex/verified-app-window-effects` introduz verifiers específicos, mantendo o fallback fail-closed do ANT-253:
+A PR #26 introduziu os primeiros verifiers específicos, mantendo o fallback fail-closed do ANT-253. A continuação em `codex/ant-254-open-app-hardening` corrige dois riscos observados após a integração:
 
 - `open_app` no Windows deixa de depender do texto `Opened X`;
 - mapeia aplicações conhecidas para processos esperados e observa processos via `psutil`;
 - recolhe janelas visíveis associadas aos PIDs via Win32 quando disponível;
-- só promove a `verified=true` quando a aplicação esperada está realmente em execução após o pedido;
+- captura processos, janelas visíveis e foreground antes e depois de `open_app`;
+- só promove a `verified=true` quando observa novo PID, nova janela ou mudança de foreground para o alvo;
+- uma aplicação que já estava aberta sem transição observável permanece `verified=false`;
+- o launcher Windows deixa de usar `shell=True`: executáveis usam argumentos estruturados e apenas `ms-settings:` é aceite como URI conhecida;
+- `computer_control.focus_window` deixa de interpolar o título num comando PowerShell e usa enumeração/foco Win32 com o título tratado apenas como texto;
 - `computer_control.focus_window` compara o título solicitado com a janela foreground real;
 - o Local Fast Path também revalida `open_app` antes de usar wording de sucesso;
 - em plataformas sem o verifier específico, mantém `verified=false` em vez de inventar sucesso.
 
-Ainda faltam nesta família minimize/maximize/switch com pre-state/target identity robustos; não marcar ANT-254 como concluída até cobrir/limitar esses casos e passar CI/E2E apropriados.
+Validação local desta continuação: 162 testes passaram em Python 3.11 no ambiente bloqueado por `uv.lock`; compilação, `uv lock --check` e `git diff --check` passaram. Inclui regressões que garantem que `focus_window` não invoca PowerShell e trata texto semelhante a comandos apenas como título literal. O E2E Windows não foi executado. Ainda faltam nesta família minimize/maximize/switch com pre-state/target identity robustos; não marcar ANT-254 como concluída até cobrir/limitar esses casos e passar CI/E2E apropriados.
 
 ## Implementação integrada — Realtime Computer Use económico (E2E pendente)
 

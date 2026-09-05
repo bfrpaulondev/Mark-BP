@@ -258,14 +258,39 @@ def _focus_window(title: str) -> str:
     os_name = _get_os()
 
     if os_name == "windows":
+        requested = str(title or "").strip()
+        if not requested or len(requested) > 120 or any(ord(ch) < 32 for ch in requested):
+            return "focus_window (Windows) failed: invalid window title"
+
         try:
-            script = f'(New-Object -ComObject WScript.Shell).AppActivate("{title}")'
-            subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True, timeout=5, **_WIN_HIDE,
-            )
+            import win32con
+            import win32gui
+
+            matches: list[int] = []
+
+            def _collect(hwnd, _extra):
+                try:
+                    window_title = str(win32gui.GetWindowText(hwnd) or "").strip()
+                    if (
+                        win32gui.IsWindowVisible(hwnd)
+                        and requested.casefold() in window_title.casefold()
+                    ):
+                        matches.append(int(hwnd))
+                except Exception:
+                    pass
+                return True
+
+            win32gui.EnumWindows(_collect, None)
+            if not matches:
+                return f"focus_window (Windows) failed: window not found: {requested}"
+
+            target = matches[0]
+            win32gui.ShowWindow(target, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(target)
             time.sleep(0.3)
-            return f"Focused window: {title}"
+            return f"Focus requested for window: {requested}"
+        except ImportError:
+            return "focus_window (Windows) failed: pywin32 is unavailable"
         except Exception as e:
             return f"focus_window (Windows) failed: {e}"
 

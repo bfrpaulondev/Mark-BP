@@ -1,3 +1,5 @@
+import os
+import re
 import time
 import subprocess
 import platform
@@ -10,6 +12,8 @@ except ImportError:
     _PSUTIL = False
 
 _SYSTEM = platform.system()
+
+_WINDOWS_URI_PATTERN = re.compile(r"ms-settings:[A-Za-z0-9._/?=&%+\-]*", re.IGNORECASE)
 
 _APP_ALIASES: dict[str, dict[str, str]] = {
 
@@ -75,15 +79,19 @@ def _normalize(raw: str) -> str:
         if alias_key in key or key in alias_key:
             return os_map.get(_SYSTEM, raw)
 
-    return raw  
+    return raw
+
+
+def _is_allowed_windows_uri(value: str) -> bool:
+    return bool(_WINDOWS_URI_PATTERN.fullmatch(str(value or "").strip()))
 
 def _launch_windows(app_name: str) -> bool:
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
+    binary = shutil.which(app_name) or shutil.which(app_name.split(".")[0])
+    if binary:
         try:
             subprocess.Popen(
-                app_name,
-                shell=True,
+                [binary],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -92,13 +100,13 @@ def _launch_windows(app_name: str) -> bool:
         except Exception as e:
             print(f"[open_app] subprocess failed: {e}")
 
-    if ":" in app_name:
+    if _is_allowed_windows_uri(app_name):
         try:
-            subprocess.Popen(f"start {app_name}", shell=True)
+            os.startfile(app_name)
             time.sleep(1.0)
             return True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[open_app] URI launch failed: {e}")
 
     try:
         import pyautogui
@@ -243,10 +251,12 @@ def open_app(
     player=None,
     session_memory=None,
 ) -> str:
-    app_name = (parameters or {}).get("app_name", "").strip()
+    app_name = str((parameters or {}).get("app_name", "") or "").strip()
 
     if not app_name:
         return "No application name provided."
+    if len(app_name) > 120 or any(ord(ch) < 32 for ch in app_name):
+        return "Invalid application name."
 
     launcher = _OS_LAUNCHERS.get(_SYSTEM)
     if launcher is None:

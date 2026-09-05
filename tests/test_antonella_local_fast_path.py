@@ -18,6 +18,11 @@ class AntonellaLocalFastPathTests(unittest.TestCase):
         source = (root / "antonella.py").read_text(encoding="utf-8")
 
         self.assertIn("verify_open_app_postcondition", source)
+        self.assertIn("capture_open_app_state", source)
+        self.assertLess(
+            source.index("capture_open_app_state(app_name)"),
+            source.index("execute_local_intent(intent, player=self.ui)"),
+        )
         self.assertIn('intent.kind == "open_app"', source)
         self.assertIn("verification.can_claim_success", source)
         self.assertIn("fast-path open_app", source)

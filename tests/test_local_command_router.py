@@ -1,6 +1,8 @@
 import os
+import sys
+import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from core.local_command_router import (
     LocalCommandIntent,
@@ -81,7 +83,9 @@ class LocalCommandRouterTests(unittest.TestCase):
         self.assertIn("ainda não verifiquei", result.message)
 
     def test_legacy_scroll_delivery_is_not_upgraded_to_verified_success(self):
-        with patch("actions.computer_control.computer_control", return_value="Scrolled down ×3"):
+        computer_control = types.ModuleType("actions.computer_control")
+        computer_control.computer_control = Mock(return_value="Scrolled down ×3")
+        with patch.dict(sys.modules, {"actions.computer_control": computer_control}):
             result = execute_local_intent(
                 LocalCommandIntent("scroll", {"direction": "down", "amount": 3})
             )

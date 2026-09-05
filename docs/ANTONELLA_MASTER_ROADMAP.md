@@ -9,6 +9,11 @@
 **Criado em:** 2026-08-25  
 **Responsável pelo produto:** Bruno Paulon
 
+**Execução prioritária atual:** o hardening incremental das capacidades já entregues
+está definido em `docs/ANTONELLA_PRIORITY_HARDENING.md` (ANT-251–278) e o estado
+com evidência permanece em `docs/ANTONELLA_PROGRESS.md`. Este anexo não altera nem
+renumera as tarefas históricas deste plano mestre.
+
 ---
 
 ## 1. Visão do produto
