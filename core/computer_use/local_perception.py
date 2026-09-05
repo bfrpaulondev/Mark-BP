@@ -48,9 +48,16 @@ _RISKY_TERMS = {
     "transfer",
     "confirm",
     "approve",
+    "save",
+    "apply",
+    "accept",
+    "allow",
+    "install",
+    "uninstall",
+    "login",
+    "signin",
     "shutdown",
     "restart",
-    "uninstall",
     "apagar",
     "eliminar",
     "excluir",
@@ -63,9 +70,30 @@ _RISKY_TERMS = {
     "transferir",
     "confirmar",
     "aprovar",
+    "guardar",
+    "salvar",
+    "aplicar",
+    "aceitar",
+    "permitir",
+    "instalar",
+    "desinstalar",
+    "entrar",
+    "autenticar",
     "desligar",
     "reiniciar",
-    "desinstalar",
+}
+_GENERIC_COMMIT_LABELS = {
+    "ok",
+    "yes",
+    "sim",
+    "continue",
+    "continuar",
+    "next",
+    "seguinte",
+    "finish",
+    "concluir",
+    "done",
+    "feito",
 }
 
 
@@ -123,7 +151,9 @@ class LocalPerceptionPlanner:
             return None
 
         target = _extract_explicit_click_target(objective)
-        if not target or _contains_risky_term(target) or _contains_risky_term(objective):
+        if not target or not _is_locally_safe_target(target):
+            return None
+        if _contains_risky_term(objective):
             return None
 
         cache_key = _request_digest(
@@ -268,6 +298,14 @@ def _normalize_label(value: Any) -> str:
 
 
 # -.-.-.-
+def _is_locally_safe_target(value: Any) -> bool:
+    normalized = _normalize_label(value)
+    if not normalized or normalized in _GENERIC_COMMIT_LABELS:
+        return False
+    return not _contains_risky_term(normalized)
+
+
+# -.-.-.-
 def _contains_risky_term(value: Any) -> bool:
     normalized = _normalize_label(value)
     if not normalized:
@@ -327,6 +365,7 @@ def _request_digest(
             _normalize_label(objective),
             hashlib.sha256(str(target_window).encode("utf-8")).hexdigest()[:16],
             str(frame.perception_digest or ""),
+            str(frame.sequence),
             str(frame.monitor_index),
             str(frame.left),
             str(frame.top),
