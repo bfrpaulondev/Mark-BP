@@ -15,9 +15,9 @@ quando não pode → informa claramente sem inventar sucesso
 
 ## P0 — confiabilidade das capacidades já entregues
 
-- [ ] **ANT-251 — Integrar Local Command Fast Path.** Executar comandos simples e inequívocos de baixo risco sem um novo turno LLM; multi-etapa deve continuar para o cérebro.
-- [ ] **ANT-252 — Criar `ExecutionResult` canónico.** Contrato machine-readable com `ok`, `delivered`, `verified`, `evidence`, `error`, `risk`, `requires_approval`, timestamps/correlation quando aplicável.
-- [ ] **ANT-253 — Criar Verifier central.** Separar postconditions da implementação de cada tool e impedir que ausência de exception seja tratada como sucesso.
+- [x] **ANT-251 — Integrar Local Command Fast Path.** Executar comandos simples e inequívocos de baixo risco sem um novo turno LLM; multi-etapa deve continuar para o cérebro. Integrado em `main` por PR #24.
+- [x] **ANT-252 — Criar `ExecutionResult` canónico.** Contrato machine-readable com `ok`, `delivered`, `verified`, `evidence`, `error`, `risk`, `requires_approval`, timestamps/correlation quando aplicável. Primeira versão integrada em `main` por PR #24.
+- [ ] **ANT-253 — Criar Verifier central.** Separar postconditions da implementação de cada tool e impedir que ausência de exception seja tratada como sucesso. Em implementação na branch `codex/execution-verifier-core`.
 - [ ] **ANT-254 — Verificar aplicações/janelas.** `open_app`, focus/minimize/maximize/switch devem confirmar processo/janela/foreground quando tecnicamente possível.
 - [ ] **ANT-255 — Verificar mouse e teclado.** Move/click/double/right/drag/scroll/hotkeys/type/paste com target/foreground/postcondition; `verified=false` quando efeito não puder ser provado.
 - [ ] **ANT-256 — Consolidar browser real verificável.** Tabs por índice/título/URL, múltiplas janelas, popups/downloads e SPA; CDP/Playwright quando possível, UIA/Win32 como fallback e input verificável por último.
