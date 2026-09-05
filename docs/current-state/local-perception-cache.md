@@ -64,16 +64,35 @@ para um caso deliberadamente estreito:
 
 Qualquer ambiguidade, plataforma sem UIA, erro de enumeração, controlo fora do
 frame, pedido multi-etapa ou acção sensível cai imediatamente para o VLM.
+Labels genéricas que frequentemente confirmam efeitos (`OK`, `Sim`, `Continue`,
+`Next`, etc.) também não podem usar esta rota.
 
 Para evitar repetição de clicks depois de uma acção, a rota UIA local só é
 considerada no primeiro passo sem histórico. Recovery posterior continua a
 replanear normalmente.
 
+### Contexto semântico para safety
+
+O nome alvo é necessário transitoriamente para distinguir navegação de efeitos
+como `Save`, `Send`, `Run`, `Install` ou `Sign in`. Para não misturar esta
+necessidade com logs/evidence, `ComputerAction` possui `safety_context`:
+
+- apenas adapters determinísticos locais o preenchem;
+- `ComputerAction.from_mapping()` ignora qualquer valor com esse nome vindo do
+  modelo;
+- `evaluate_action()` usa-o para tornar a decisão mais restritiva;
+- `history_line()`, `SessionState`, logs e telemetria não o serializam.
+
+Assim a classificação local mantém contexto suficiente para segurança sem
+transformar o nome do controlo num campo persistente de observabilidade.
+
 ## Cache UIA
 
 O pequeno cache de sugestões UIA guarda apenas coordenadas, tipo de controlo e
 expiração. Objectivo, label do controlo e título da janela entram apenas num
-digest de request e não são retidos como texto.
+digest de request e não são retidos como texto. O número de sequência do frame
+faz parte da identidade do request, impedindo reuse da coordenada depois de um
+novo frame.
 
 ## Telemetria
 
