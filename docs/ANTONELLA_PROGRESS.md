@@ -4,30 +4,29 @@
 
 **Última atualização:** 2026-09-05
 **Branch canónica:** `main`
-**Main confirmado antes da PR #32:** `3186a1406f496a7004c8696805680c50b7e59a3e`
+**Main confirmado antes da PR #34:** `6cd8601b9a0a9b4d3a9a94ceb701f5ab993fd8c8`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | ANT-256 — última slice CDP seguro; escopo de código fecha com PR #32 |
-| Branch de implementação | `codex/ant-256-safe-cdp-bridge` |
-| Pull request | PR #32 — safe optional CDP bridge |
+| Tarefa a fechar | ANT-258 — UIA/files/settings verification |
+| Branch de implementação | `codex/ant-258-uia-files-settings-verification` |
+| Pull request | PR #34 — verify UIA, filesystem and Windows settings effects |
 | Issues abertas | Nenhuma necessária para este trabalho |
-| Próximo teste real | Windows: browser Chromium já iniciado explicitamente com remote debugging local; status/list/switch CDP |
-| Próximo bloco | ANT-257 — multi-monitor/DPI hardening |
+| CI de código | #105 verde em Dependency lock + Python 3.11 + Python 3.12 no head inicial; nova execução pendente após hardening UIA |
+| Próximo teste real | ANT-275 Windows físico: UIA, settings, filesystem, multi-monitor/DPI e browser real |
+| Próximo bloco | ANT-259 — extrair `AgentOrchestrator` incremental sem quebrar o runtime actual |
 
 ## Prioridade aprovada em 2026-09-05
 
-1. ANT-251 — Local Fast Path;
-2. ANT-252/253 — `ExecutionResult` + Verifier central;
-3. ANT-254–258 — postconditions reais das ferramentas prontas;
-4. ANT-259–263 — AgentOrchestrator, ToolRouter/ExecutionEngine, Policy Engine, aprovação humana e Provider Router;
-5. ANT-264–267 — custo/telemetria, percepção local, ScreenConnect e recovery;
-6. ANT-268–272 — UI/UX, Agent Control Center, voz/verificação e identidade;
-7. ANT-273–275 — Windows CI, observabilidade e E2E real;
-8. ANT-276–278 — Supabase Memory, Skills e Persistent Tasks;
-9. MT5/Fimathe depois dos gates de core/segurança/confiabilidade.
+1. ANT-251–258 — execução verificável / P0;
+2. ANT-259–263 — AgentOrchestrator, ToolRouter/ExecutionEngine, Policy Engine, aprovação humana e Provider Router;
+3. ANT-264–267 — custo/telemetria, percepção local, ScreenConnect e recovery;
+4. ANT-268–272 — UI/UX, Agent Control Center, voz/verificação e identidade;
+5. ANT-273–275 — Windows CI, observabilidade e E2E real;
+6. ANT-276–278 — Supabase Memory, Skills e Persistent Tasks;
+7. MT5/Fimathe depois dos gates de core/segurança/confiabilidade.
 
 Critério central: **quando consegue, prova; quando não consegue, sabe que não conseguiu e não inventa sucesso.**
 
@@ -37,63 +36,58 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - PR #23: runtime-readiness; merge `2952eb9c26f4c04b8dbd6e945daf2395eebe6107`; CI verde.
 - PR #24: Local Fast Path + `ExecutionResult`; merge `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`; CI verde.
 - PR #25: Verifier central; merge `8b4371f15b312834743cdf08e07ad6a180d298ff`; fail-closed para side effects; CI verde.
-- PR #26: primeira slice `open_app`/focus; merge `6bd204892b3e72fb3ea8ed6f68f6497155f807e5`; CI verde.
-- PR #27: hardening `open_app`; merge `8558ce21a7e07e466198a706ed0cf90cef1c8bed`; pre-state/delta real e launcher Windows sem `shell=True`; CI verde.
-- PR #28: desktop input/window postconditions; merge `680c537e6d31244aceca444648315d82e1d596cf`; ANT-254/255 cobertos por verificadores locais; CI verde.
-- PR #29: real browser windows/tabs; merge `56a91411d7b30a69096305e1c7267875911b33fb`; múltiplas janelas reais, tabs por índice/título/URL e ambiguity fail-closed; CI verde.
-- PR #30: managed Playwright verification; merge `6ca8e8e4cf37bca6bc4f5a8ce4c2aa0f708fe43a`; efeitos DOM com postconditions estruturais; CI verde.
-- PR #31: SPA/popups/downloads; merge `3186a1406f496a7004c8696805680c50b7e59a3e`; MutationObserver com baseline de ruído, `expect_popup`, `expect_download`, persistência opt-in segura; CI verde.
+- PR #26–#28: apps/janelas + desktop input postconditions; ANT-254/255 fechados no código; CI verde.
+- PR #29: browser real Win32/UIA; merge `56a91411d7b30a69096305e1c7267875911b33fb`; ambiguity fail-closed.
+- PR #30: managed Playwright verification; merge `6ca8e8e4cf37bca6bc4f5a8ce4c2aa0f708fe43a`.
+- PR #31: SPA/popups/downloads; merge `3186a1406f496a7004c8696805680c50b7e59a3e`.
+- PR #32: safe optional CDP bridge; merge `aaabdda9485483712b88413f3be4e584be3e3886`.
+- PR #33: multi-monitor/DPI hardening; merge `6cd8601b9a0a9b4d3a9a94ceb701f5ab993fd8c8`; stale display frames falham fechados.
 
-## ANT-251–255 — integrados
+## ANT-257 — integrado
 
-- comandos simples podem evitar um novo turno LLM;
-- `ExecutionResult` e `core/verifier.py` são fail-closed;
-- apps/janelas e input físico usam estado Windows/UIA/frame-diff local quando disponível;
-- texto digitado e amostras efémeras não são serializados na evidence.
+- Per-Monitor DPI Awareness V2 em Windows;
+- geometria física Win32 + MSS, sem assumir ordem de enumeração;
+- DPI/scale/primary/device por display;
+- suporta monitor à esquerda/acima e coordenadas negativas;
+- `topology_token` muda com geometria, DPI, primary e hot-plug;
+- target de monitor explícito fica preso à identidade física (`device` + geometria fallback);
+- disconnect/reconnect não reutiliza silenciosamente índice antigo;
+- frame antigo é invalidado após mudança de topologia;
+- input visual exige token capturado + token vivo iguais; se a topologia não puder ser lida, o input não é despachado;
+- CI final #99 totalmente verde antes do merge;
+- validação física permanece no ANT-275.
 
-## ANT-256 — escopo de código fechado pela PR #32
+## ANT-258 — PR #34
 
-### Browser real já aberto — PR #29
+### Windows UI Automation
 
-- `verified_desktop_control` controla Chrome/Edge/Firefox/Opera/Brave/Vivaldi via Win32/UIA;
-- enumera/foca janelas reais, não adivinha ambiguidades e verifica tabs por índice/título/URL;
-- clipboard usado para ler URL é restaurado;
-- Playwright paralelo não é apresentado como se fosse a janela já aberta do utilizador.
+- `list_windows`, `inspect` e `find` são tratados como reads;
+- `click` e `set_text` são side effects e devolvem `delivered/verified` explícitos;
+- janela/controlo com múltiplos matches igualmente fortes falha fechado;
+- click só verifica uma transição estrutural/UIA; mudança isolada de foco ou foreground fica em evidence, mas não prova sucesso;
+- set_text relê o valor exacto;
+- texto real fica apenas em memória e não entra na evidence;
+- erro no readback depois de input entregue fica `delivered=true, verified=false`.
 
-### Browser Playwright explicitamente gerido — PR #30
+### Filesystem
 
-- `verified_browser_automation` valida `go_to/search/type/smart_type/scroll/click/smart_click/fill_form/new_tab/close_tab/back/forward/reload`;
-- valores de inputs/formulários não entram na evidence;
-- `session_status` é read-only e não cria sessão;
-- o legado `browser_control` permanece apenas por compatibilidade.
+- pre-state e post-state usam exactamente source/destination resolvidos antes da mutação;
+- o verificador respeita os mesmos `_SAFE_ROOTS` do `file_controller` e não inspecciona paths que a tool recusaria;
+- create/write/append/delete/move/copy/rename/organize têm postconditions próprias;
+- ficheiros pequenos usam hash completo; ficheiros grandes usam fingerprint bounded first/last + size;
+- append confirma tamanho e tail exacto;
+- move/copy/rename confirmam identidade estrutural/conteúdo;
+- ficheiro vazio é suportado correctamente;
+- full path, filename e conteúdo são retirados da evidence pública.
 
-### SPA, popups e downloads — PR #31
+### Settings Windows
 
-- click em SPA mede mutações DOM acima do ruído local, sem screenshot/modelo;
-- popup é correlacionado com o clique por `expect_popup` e verificado por page-count/página aberta;
-- download é correlacionado por `expect_download` e permanece fail-closed se o estado final não puder ser consultado;
-- persistência é opt-in em `~/Downloads`, com nome sanitizado e sem overwrite silencioso;
-- evidence não inclui caminho completo, filename ou conteúdo do download.
-
-### CDP opcional seguro — PR #32
-
-Novo `actions/real_browser_cdp.py` fornece fallback estruturado somente quando um browser Chromium já foi explicitamente iniciado com remote debugging local:
-
-- endpoint fixo em `127.0.0.1`; apenas `cdp_port` é configurável e não existe scan/discovery;
-- `/json/version` é lido por stdlib com timeout curto e resposta limitada;
-- `webSocketDebuggerUrl` e User-Agent não são serializados;
-- Firefox/outros engines são recusados antes do probe;
-- `browser_cdp_status` confirma o endpoint;
-- `browser_cdp_list_tabs` faz attach temporário e lista tabs estruturadas;
-- `browser_cdp_switch_tab` selecciona por índice/título/URL e verifica `document.visibilityState` após activação;
-- attach ao daily-driver exige `connect_over_cdp(no_defaults=True)`; versões Playwright sem esta protecção falham fechadas;
-- `is_local=True` é usado quando suportado;
-- não são lançados browsers, não são adicionadas flags, não são criados contextos nem recolhidos cookies/storage/DOM text;
-- a conexão é limitada por timeout e `browser.close()` serve apenas para desligar o cliente de um browser conectado.
-
-A primeira CI da PR #32 detectou apenas a regressão textual `verified boolean` no contrato antigo do plugin. O wording foi restaurado sem reduzir a segurança e o lifecycle da thread CDP foi adicionalmente limitado para não esperar implicitamente após timeout. A CI final do head/documentação tem de ficar verde antes do merge.
-
-O escopo de implementação do ANT-256 fica fechado com esta PR. O E2E físico de browser real/Playwright/CDP permanece na matriz transversal ANT-275, tal como os E2E Windows das ANT-254/255.
+- volume set/up/down, mute/unmute/toggle: readback do endpoint de áudio;
+- brightness up/down: estado WMI/CIM;
+- dark mode: registry HKCU;
+- Wi-Fi toggle: estado do adapter;
+- minimize/maximize/switch_window mantêm o verificador Win32 anterior;
+- se o estado não puder ser observado, a acção não é promovida a sucesso.
 
 ## Realtime Computer Use económico — integrado, E2E físico pendente
 
@@ -102,20 +96,22 @@ O escopo de implementação do ANT-256 fica fechado com esta PR. O E2E físico d
 - frame diff local e target-window ROI;
 - economy default, budgets, OpenAI opcional/fallback Gemini;
 - micro-batching conservador;
-- approvals de uso único e stop durante execução/espera.
+- approvals de uso único e stop durante execução/espera;
+- ANT-257 agora impede input com frame/topologia obsoletos.
 
 ## Validações e limites conhecidos
 
-- Unit tests/CI Linux não provam Win32, UIA, áudio físico, DPI, multi-monitor, Playwright GUI/CDP real ou ScreenConnect.
+- Unit tests/CI Linux não provam Win32, UIA, pycaw, WMI/CIM, áudio físico, DPI, multi-monitor, Playwright GUI/CDP real ou ScreenConnect.
 - Um efeito sem estado observável suficiente permanece `verified=false`.
-- E2E Windows físico continua no ANT-275 e deve ser executado antes de elevar a nota de produção.
-- A extracção do `main.py` começa apenas depois do P0 ANT-254–258.
+- E2E Windows físico continua centralizado no ANT-275.
+- A extracção do `main.py` pode começar incrementalmente no ANT-259 depois da integração da PR #34.
 
 ## Próxima sequência
 
-1. integrar PR #32 apenas se a CI final continuar verde;
-2. ANT-257 — multi-monitor/DPI hardening;
-3. ANT-258 — UIA/files/settings;
-4. ANT-259–263 — Orchestrator/Policy/Provider Router;
-5. custo/UI/observabilidade;
-6. memória Supabase/skills depois do core confiável.
+1. obter revisão humana da PR #34 e integrar apenas com a CI final verde;
+2. ANT-259 — `AgentOrchestrator` incremental;
+3. ANT-260 — `ToolRouter` + `ExecutionEngine`;
+4. ANT-261/262 — Policy Engine + aprovação humana vinculada;
+5. ANT-263 — Provider Router completo;
+6. ANT-264–267 — custo/Computer Use/ScreenConnect;
+7. ANT-268+ — UI/voz/observabilidade/E2E/memória.

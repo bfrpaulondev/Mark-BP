@@ -10,9 +10,13 @@ _ALWAYS_VERIFY = {
     "computer_settings",
     "verified_desktop_control",
     "verified_browser_automation",
-    "windows_ui_automation",
     "send_message",
     "reminder",
+}
+
+_UIA_EFFECT_ACTIONS = {
+    "click",
+    "set_text",
 }
 
 _BROWSER_EFFECT_ACTIONS = {
@@ -79,6 +83,8 @@ def requires_postcondition(tool_name: str, args: Mapping[str, Any] | None = None
 
     if name in _ALWAYS_VERIFY:
         return True
+    if name == "windows_ui_automation":
+        return action in _UIA_EFFECT_ACTIONS
     if name == "browser_control":
         return action in _BROWSER_EFFECT_ACTIONS
     if name == "file_controller":

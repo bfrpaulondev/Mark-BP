@@ -20,11 +20,11 @@ quando não pode → informa claramente sem inventar sucesso
 - [x] **ANT-253 — Criar Verifier central.** Separar postconditions da implementação de cada tool e impedir que ausência de exception seja tratada como sucesso. Integrado em `main` por PR #25.
 - [x] **ANT-254 — Verificar aplicações/janelas.** `open_app` e `focus_window` usam processo/janela/foreground real; `minimize`, `maximize` e `switch_window` passam a verificar estado Win32 antes/depois. PR #27 endureceu abertura/foreground e PR #28 fecha as window postconditions. E2E Windows físico continua na matriz ANT-275.
 - [x] **ANT-255 — Verificar mouse e teclado.** `move/click/double/right/drag/scroll/hotkey/press/type/smart_type/paste/clear_field` recebem pre/post state e só ficam `verified=true` quando a postcondition disponível prova o efeito. Texto real de controlos permanece privado em memória e não é serializado em `ExecutionResult.evidence`. PR #28.
-- [x] **ANT-256 — Consolidar browser real verificável.** PR #29 cobre janelas/tabs reais por UIA/Win32; PR #30 cobre efeitos DOM Playwright com postconditions; PR #31 acrescenta SPA/popups/downloads; PR #32 fecha a camada opcional CDP com loopback-only, porta explícita, sem scan/relaunch e `no_defaults=True` obrigatório antes de attach ao daily-driver. E2E Windows/Playwright físico permanece centralizado no ANT-275, sem invalidar o fecho do escopo de código desta tarefa.
-- [ ] **ANT-257 — Hardening multi-monitor/DPI.** Diferentes escalas DPI, monitor acima/abaixo/esquerda, mudança do principal, disconnect/reconnect, coordenadas relativas à janela e virtual desktop.
-- [ ] **ANT-258 — Aplicar verificação a UIA, ficheiros e settings.** Respostas estruturadas e postconditions apropriadas a cada domínio.
+- [x] **ANT-256 — Consolidar browser real verificável.** PR #29 cobre janelas/tabs reais por UIA/Win32; PR #30 cobre efeitos DOM Playwright com postconditions; PR #31 acrescenta SPA/popups/downloads; PR #32 fecha a camada opcional CDP com loopback-only, porta explícita, sem scan/relaunch e `no_defaults=True` obrigatório antes de attach ao daily-driver. E2E Windows/Playwright físico permanece centralizado no ANT-275.
+- [x] **ANT-257 — Hardening multi-monitor/DPI.** PR #33 integra Per-Monitor DPI Awareness V2, topologia física Win32/MSS, DPI/scale/primary, monitores negativos/acima, hot-plug, pinning de display explícito e stale-frame rejection. Ausência de topologia viva falha fechada. E2E físico continua no ANT-275.
+- [x] **ANT-258 — Aplicar verificação a UIA, ficheiros e settings.** PR #34 fecha o escopo de código: UIA effect reads estruturados e ambiguity fail-closed; filesystem relê source/destination dentro dos mesmos safety roots e verifica conteúdo/estado sem expor paths/conteúdo; settings Windows observáveis são relidos após a acção. Acções sem postcondition observável permanecem explicitamente `verified=false`. E2E físico continua no ANT-275.
 
-**Gate P0:** nenhuma acção física/externa crítica das áreas já cobertas pode ser anunciada como concluída apenas porque a chamada não lançou exception.
+**Gate P0:** concluído no código quando PR #34 estiver integrada e verde. Nenhuma acção física/externa crítica das áreas cobertas é anunciada como concluída apenas porque a chamada não lançou exception. O gate de hardware/Windows real permanece separado no ANT-275.
 
 ## P1 — core de agente
 
@@ -65,15 +65,13 @@ quando não pode → informa claramente sem inventar sucesso
 
 ## Ordem imediata de execução
 
-1. ANT-251 Local Fast Path;
-2. ANT-252/253 ExecutionResult + Verifier;
-3. ANT-254–258 postconditions das ferramentas prontas;
-4. ANT-259–263 Orchestrator/ToolRouter/Policy/Provider Router;
-5. ANT-264–267 custo + Computer Use/ScreenConnect;
-6. ANT-268–272 UI/voz/identidade;
-7. ANT-273–275 CI/observabilidade/E2E;
-8. ANT-276–278 memória/skills/tasks persistentes;
-9. retomar a sequência MT5/Fimathe do plano mestre quando os gates anteriores estiverem verdes.
+1. ANT-251–258 — P0 de execução verificável concluído no código;
+2. ANT-259–263 — Orchestrator/ToolRouter/Policy/Provider Router;
+3. ANT-264–267 — custo + Computer Use/ScreenConnect;
+4. ANT-268–272 — UI/voz/identidade;
+5. ANT-273–275 — CI/observabilidade/E2E;
+6. ANT-276–278 — memória/skills/tasks persistentes;
+7. retomar a sequência MT5/Fimathe do plano mestre quando os gates anteriores estiverem verdes.
 
 ## Definição de concluído deste anexo
 

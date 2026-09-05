@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import platform
+import time
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,30 @@ class ControlSummary:
             "visible": self.visible,
             "rectangle": list(self.rectangle) if self.rectangle else None,
         }
+
+
+# -.-.-.-
+def _result(
+    action: str,
+    *,
+    ok: bool,
+    delivered: bool,
+    verified: bool,
+    message: str = "",
+    error: str | None = None,
+    evidence: Mapping[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "action": f"windows_ui_automation.{action}",
+        "ok": bool(ok),
+        "delivered": bool(delivered),
+        "verified": bool(verified),
+        "message": str(message or ""),
+        "evidence": dict(evidence or {}),
+    }
+    if error:
+        payload["error"] = str(error)
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
 # -.-.-.-
@@ -58,6 +83,14 @@ def _foreground_handle() -> int:
 
 
 # -.-.-.-
+def _window_handle(window: Any) -> int:
+    try:
+        return int(getattr(window, "handle", 0) or 0)
+    except Exception:
+        return 0
+
+
+# -.-.-.-
 def _window_wrapper(title: str = ""):
     Desktop = _load_pywinauto()
     desktop = Desktop(backend="uia")
@@ -67,9 +100,9 @@ def _window_wrapper(title: str = ""):
         return desktop.window(handle=_foreground_handle())
 
     windows = desktop.windows()
-    ranked: list[tuple[int, Any]] = []
+    ranked: list[tuple[int, int, Any]] = []
     needle = normalized.casefold()
-    for window in windows:
+    for index, window in enumerate(windows):
         try:
             text = str(window.window_text() or "")
         except Exception:
@@ -85,13 +118,19 @@ def _window_wrapper(title: str = ""):
             score = 2
         else:
             continue
-        ranked.append((score, window))
+        ranked.append((score, index, window))
 
     if not ranked:
         raise RuntimeError(f"No visible window matched '{normalized}'.")
 
-    ranked.sort(key=lambda item: item[0])
-    return ranked[0][1]
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    best_score = ranked[0][0]
+    best = [item for item in ranked if item[0] == best_score]
+    if len(best) != 1:
+        raise RuntimeError(
+            f"Window selector '{normalized}' is ambiguous ({len(best)} equally strong matches)."
+        )
+    return best[0][2]
 
 
 # -.-.-.-
@@ -208,7 +247,13 @@ def _find_control(
     if not candidates:
         return None
     candidates.sort(key=lambda item: (item[0], item[1]))
-    _, _, control, summary = candidates[0]
+    best_score = candidates[0][0]
+    best = [item for item in candidates if item[0] == best_score]
+    if len(best) != 1:
+        raise RuntimeError(
+            f"Control selector is ambiguous ({len(best)} equally strong UI Automation matches)."
+        )
+    _, _, control, summary = best[0]
     return control, summary
 
 
@@ -285,6 +330,94 @@ def _set_control_text(control: Any, text: str, clear_first: bool) -> str:
 
 
 # -.-.-.-
+def _read_control_value(control: Any) -> str | None:
+    try:
+        value = control.get_value()
+        if value is not None:
+            return str(value)
+    except Exception:
+        pass
+    try:
+        if _summary(control).control_type.casefold() == "edit":
+            return str(control.window_text() or "")
+    except Exception:
+        pass
+    return None
+
+
+# -.-.-.-
+def _optional_bool(control: Any, method: str) -> bool | None:
+    try:
+        value = getattr(control, method)()
+        return bool(value)
+    except Exception:
+        return None
+
+
+# -.-.-.-
+def _optional_state(control: Any, method: str) -> str | int | None:
+    try:
+        value = getattr(control, method)()
+        if value is None:
+            return None
+        if isinstance(value, (str, int)):
+            return value
+        return str(value)
+    except Exception:
+        return None
+
+
+# -.-.-.-
+def _control_state(control: Any) -> dict[str, Any]:
+    summary = _summary(control)
+    value = _read_control_value(control)
+    return {
+        "control": summary.as_dict(),
+        "focused": _optional_bool(control, "has_keyboard_focus"),
+        "selected": _optional_bool(control, "is_selected"),
+        "toggle_state": _optional_state(control, "get_toggle_state"),
+        "expand_state": _optional_state(control, "get_expand_state"),
+        "value_length": len(value) if value is not None else None,
+        "_value": value,
+    }
+
+
+# -.-.-.-
+def _public_state(state: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in state.items() if not str(key).startswith("_")}
+
+
+# -.-.-.-
+def _state_changed(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
+    # Focus is an expected side effect of many activations, not proof that the
+    # requested control produced its intended effect. Keep it in evidence, but
+    # require a stronger state transition before claiming success.
+    keys = ("selected", "toggle_state", "expand_state", "value_length")
+    for key in keys:
+        before_value = before.get(key)
+        after_value = after.get(key)
+        if before_value is not None and after_value is not None and before_value != after_value:
+            return True
+    before_control = before.get("control") if isinstance(before.get("control"), Mapping) else {}
+    after_control = after.get("control") if isinstance(after.get("control"), Mapping) else {}
+    for key in ("enabled", "visible", "rectangle"):
+        if before_control.get(key) != after_control.get(key):
+            return True
+    return False
+
+
+# -.-.-.-
+def _refind(window: Any, params: Mapping[str, Any]) -> tuple[Any, ControlSummary] | None:
+    return _find_control(
+        window,
+        name=str(params.get("name") or ""),
+        automation_id=str(params.get("automation_id") or ""),
+        control_type=str(params.get("control_type") or ""),
+        max_scan=int(params.get("max_scan") or 500),
+    )
+
+
+# -.-.-.-
 def windows_ui_automation(
     parameters: dict,
     response=None,
@@ -301,22 +434,14 @@ def windows_ui_automation(
 
     try:
         if action == "list_windows":
-            result = {"ok": True, "windows": _list_windows(limit)}
-            return json.dumps(result, ensure_ascii=False)
+            return json.dumps({"ok": True, "windows": _list_windows(limit)}, ensure_ascii=False)
 
         window = _window_wrapper(title)
 
         if action == "inspect":
-            result = {"ok": True, **_inspect_window(window, limit)}
-            return json.dumps(result, ensure_ascii=False)
+            return json.dumps({"ok": True, **_inspect_window(window, limit)}, ensure_ascii=False)
 
-        found = _find_control(
-            window,
-            name=str(params.get("name") or ""),
-            automation_id=str(params.get("automation_id") or ""),
-            control_type=str(params.get("control_type") or ""),
-            max_scan=int(params.get("max_scan") or 500),
-        )
+        found = _refind(window, params)
         if not found:
             return json.dumps(
                 {"ok": False, "error": "Control not found through Windows UI Automation."},
@@ -326,27 +451,95 @@ def windows_ui_automation(
         control, summary = found
 
         if action == "find":
-            return json.dumps(
-                {"ok": True, "control": summary.as_dict()},
-                ensure_ascii=False,
-            )
+            return json.dumps({"ok": True, "control": summary.as_dict()}, ensure_ascii=False)
 
         if action == "click":
+            before = _control_state(control)
+            before_foreground = _foreground_handle()
+            window_handle = _window_handle(window)
             method = _activate_control(control)
-            return json.dumps(
-                {"ok": True, "method": method, "control": summary.as_dict()},
-                ensure_ascii=False,
+            time.sleep(0.12)
+
+            after: dict[str, Any] = {}
+            control_missing = False
+            try:
+                refreshed_window = _window_wrapper(title) if title else window
+                refreshed = _refind(refreshed_window, params)
+                if refreshed is None:
+                    control_missing = True
+                else:
+                    after = _control_state(refreshed[0])
+            except Exception:
+                control_missing = True
+
+            try:
+                after_foreground = _foreground_handle()
+            except Exception:
+                after_foreground = 0
+
+            window_transition = bool(
+                before_foreground and after_foreground and before_foreground != after_foreground
+            )
+            # A foreground-window change can race with unrelated user activity and a
+            # focus-only change merely proves that input reached the control. Both
+            # remain useful evidence, but neither is a reliable postcondition.
+            verified = _state_changed(before, after) if after else False
+            evidence = {
+                "method": method,
+                "before": _public_state(before),
+                "after": _public_state(after),
+                "control_missing_after": control_missing,
+                "window_handle": window_handle,
+                "foreground_changed": window_transition,
+            }
+            return _result(
+                action,
+                ok=True,
+                delivered=True,
+                verified=verified,
+                message=(
+                    "UI Automation activation produced an observable structural transition."
+                    if verified
+                    else "UI Automation activation was delivered, but no reliable postcondition was observed."
+                ),
+                evidence=evidence,
             )
 
         if action == "set_text":
-            method = _set_control_text(
-                control,
-                str(params.get("text") or ""),
-                bool(params.get("clear_first", True)),
-            )
-            return json.dumps(
-                {"ok": True, "method": method, "control": summary.as_dict()},
-                ensure_ascii=False,
+            requested = str(params.get("text") or "")
+            before = _control_state(control)
+            method = _set_control_text(control, requested, bool(params.get("clear_first", True)))
+            time.sleep(0.08)
+
+            after: dict[str, Any] = {}
+            readback_error = False
+            try:
+                refreshed = _refind(window, params)
+                if refreshed:
+                    after = _control_state(refreshed[0])
+            except Exception:
+                readback_error = True
+
+            actual = after.get("_value")
+            verified = actual is not None and str(actual) == requested
+            evidence = {
+                "method": method,
+                "before": _public_state(before),
+                "after": _public_state(after),
+                "expected_length": len(requested),
+                "readback_error": readback_error,
+            }
+            return _result(
+                action,
+                ok=True,
+                delivered=True,
+                verified=verified,
+                message=(
+                    "UI Automation text value was re-read and matched the requested value."
+                    if verified
+                    else "Text input was delivered, but the control value could not be verified."
+                ),
+                evidence=evidence,
             )
 
         return json.dumps(
@@ -360,4 +553,10 @@ def windows_ui_automation(
                 player.write_log(f"SYS: Windows UI Automation · {exc}")
             except Exception:
                 pass
-        return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
+        return _result(
+            action or "unknown",
+            ok=False,
+            delivered=False,
+            verified=False,
+            error=str(exc),
+        )
