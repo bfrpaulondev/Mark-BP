@@ -6,6 +6,7 @@ from core.computer_use.contracts import ComputerAction, FrameSnapshot
 
 
 _COORDINATE_ACTIONS = {"click", "double_click", "right_click", "move"}
+_CONTENT_SENSITIVE_ACTIONS = {"type", "smart_type"}
 _RETRY_SAFE_ACTIONS = {"scroll"}
 
 
@@ -100,21 +101,40 @@ class RecoveryState:
 
 # -.-.-.-
 def frame_is_superseded(planned: FrameSnapshot, latest: FrameSnapshot) -> bool:
-    """Treat a newer emitted frame as a stale-plan boundary.
-
-    Capture only emits meaningful visual/topology/geometry changes, while exact duplicate
-    frames are suppressed. Therefore a newer sequence is enough to invalidate coordinates
-    and other visual assumptions made against the planned frame.
-    """
-
-    if latest.sequence <= planned.sequence:
-        return False
-    return True
+    """Return whether capture emitted a newer meaningful frame after planning."""
+    return latest.sequence > planned.sequence
 
 
 # -.-.-.-
 def action_uses_planned_coordinates(action: ComputerAction) -> bool:
     return action.action in _COORDINATE_ACTIONS
+
+
+# -.-.-.-
+def action_plan_is_stale(
+    action: ComputerAction,
+    planned: FrameSnapshot,
+    latest: FrameSnapshot,
+) -> bool:
+    """Invalidate only assumptions that are unsafe after a meaningful visual update.
+
+    Coordinate and text-entry actions depend directly on the planned visual state. Other
+    actions are invalidated only if the capture geometry/scope/topology changed, avoiding
+    endless replans on animated content while still failing closed on window/display moves.
+    """
+    if not frame_is_superseded(planned, latest):
+        return False
+    if action.action in _COORDINATE_ACTIONS or action.action in _CONTENT_SENSITIVE_ACTIONS:
+        return True
+    return (
+        planned.left != latest.left
+        or planned.top != latest.top
+        or planned.monitor_width != latest.monitor_width
+        or planned.monitor_height != latest.monitor_height
+        or planned.capture_scope != latest.capture_scope
+        or planned.monitor_index != latest.monitor_index
+        or planned.topology_token != latest.topology_token
+    )
 
 
 # -.-.-.-
