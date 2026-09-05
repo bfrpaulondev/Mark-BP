@@ -934,8 +934,8 @@ class _RootShim:
         return None
 
 
-class JarvisUI:
-    """Compatibility adapter exposing the legacy engine contract through Antonella UI."""
+class AntonellaUI:
+    """Canonical UI facade exposing the engine contract through Antonella UI."""
 
     def __init__(self, face_path: str = "", size=None):
         del size
@@ -1046,3 +1046,7 @@ class JarvisUI:
 
     def show_response(self, text: str) -> None:
         self.write_log(f"Antonella: {text}")
+
+
+# Compatibility alias during the incremental internal rename (BLOCO 5).
+JarvisUI = AntonellaUI
