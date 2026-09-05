@@ -85,6 +85,7 @@ class _TaskCostState:
     total_latency_ms: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    billable_output_tokens: int = 0
     cached_input_tokens: int = 0
     reasoning_tokens: int = 0
     total_tokens: int = 0
@@ -182,19 +183,19 @@ def estimate_usage_cost_usd(
         return None
 
     input_tokens = max(0, int(usage.input_tokens))
-    output_tokens = max(0, int(usage.output_tokens))
+    priced_output_tokens = max(0, int(usage.priced_output_tokens))
     cached_tokens = min(input_tokens, max(0, int(usage.cached_input_tokens)))
     uncached_tokens = max(0, input_tokens - cached_tokens)
 
     # A provider reporting only total_tokens gives too little information to
     # apply separate input/output rates safely.
-    if not input_tokens and not output_tokens:
+    if not input_tokens and not priced_output_tokens:
         return None
     if uncached_tokens and pricing.input_per_million is None:
         return None
     if cached_tokens and pricing.cached_input_per_million is None:
         return None
-    if output_tokens and pricing.output_per_million is None:
+    if priced_output_tokens and pricing.output_per_million is None:
         return None
 
     cost = 0.0
@@ -202,8 +203,8 @@ def estimate_usage_cost_usd(
         cost += uncached_tokens * float(pricing.input_per_million or 0.0) / 1_000_000
     if cached_tokens:
         cost += cached_tokens * float(pricing.cached_input_per_million or 0.0) / 1_000_000
-    if output_tokens:
-        cost += output_tokens * float(pricing.output_per_million or 0.0) / 1_000_000
+    if priced_output_tokens:
+        cost += priced_output_tokens * float(pricing.output_per_million or 0.0) / 1_000_000
     return round(cost, 12)
 
 
@@ -288,6 +289,7 @@ class CostTelemetry:
             state.total_latency_ms += event.latency_ms
             state.input_tokens += safe_usage.input_tokens
             state.output_tokens += safe_usage.output_tokens
+            state.billable_output_tokens += safe_usage.priced_output_tokens
             state.cached_input_tokens += safe_usage.cached_input_tokens
             state.reasoning_tokens += safe_usage.reasoning_tokens
             state.total_tokens += safe_usage.total_tokens
@@ -378,6 +380,7 @@ class CostTelemetry:
             "total_latency_ms": state.total_latency_ms,
             "input_tokens": state.input_tokens,
             "output_tokens": state.output_tokens,
+            "billable_output_tokens": state.billable_output_tokens,
             "cached_input_tokens": state.cached_input_tokens,
             "reasoning_tokens": state.reasoning_tokens,
             "total_tokens": state.total_tokens,
