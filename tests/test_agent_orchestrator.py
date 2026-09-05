@@ -46,6 +46,8 @@ class AgentOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(order, ["requires", "capture", "execute", "verify"])
+        self.assertEqual(outcome.route_tier, "direct_local")
+        self.assertEqual(events[0].metadata["route_tier"], "direct_local")
         self.assertTrue(outcome.execution.can_claim_success)
         self.assertEqual(outcome.response_payload["other"], 7)
         self.assertTrue(outcome.response_payload["execution"]["verified"])
