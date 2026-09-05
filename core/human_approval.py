@@ -254,6 +254,10 @@ class HumanApprovalManager:
             return bool(grant is not None and grant.expires_at > now)
 
     # -.-.-.-
+    def public_view(self, request: ApprovalRequest) -> dict[str, Any]:
+        return request.to_public_dict(now=self._clock())
+
+    # -.-.-.-
     def pending(self) -> list[dict[str, Any]]:
         now = self._clock()
         with self._lock:
