@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from core.postcondition_verifiers import (
     _expected_windows_processes,
+    verify_focus_window_postcondition,
     verify_open_app_postcondition,
     verify_postcondition,
 )
@@ -59,6 +60,43 @@ class PostconditionVerifierTests(unittest.TestCase):
 
         self.assertTrue(result.can_claim_success)
         app_verifier.assert_called_once_with("Chrome")
+
+    @patch("core.postcondition_verifiers.platform.system", return_value="Windows")
+    @patch(
+        "core.postcondition_verifiers._foreground_window_snapshot",
+        return_value={"hwnd": 7, "pid": 20, "title": "Notas - Bloco de Notas"},
+    )
+    def test_focus_window_is_verified_against_real_foreground_title(self, _foreground, _platform):
+        result = verify_focus_window_postcondition("Bloco de Notas")
+
+        self.assertTrue(result.can_claim_success)
+        self.assertEqual(result.evidence["foreground"]["hwnd"], 7)
+
+    @patch("core.postcondition_verifiers.platform.system", return_value="Windows")
+    @patch(
+        "core.postcondition_verifiers._foreground_window_snapshot",
+        return_value={"hwnd": 8, "pid": 30, "title": "Google Chrome"},
+    )
+    def test_focus_window_fails_when_foreground_is_different(self, _foreground, _platform):
+        result = verify_focus_window_postcondition("Bloco de Notas")
+
+        self.assertFalse(result.can_claim_success)
+        self.assertTrue(result.delivered)
+        self.assertIn("did not match", result.error)
+
+    @patch("core.postcondition_verifiers.verify_focus_window_postcondition")
+    def test_focus_window_domain_verifier_is_routed(self, focus_verifier):
+        from core.execution_result import ExecutionResult
+
+        focus_verifier.return_value = ExecutionResult.verified_success("computer_control.focus_window")
+        result = verify_postcondition(
+            "computer_control",
+            {"action": "focus_window", "title": "Chrome"},
+            "Focused window: Chrome",
+        )
+
+        self.assertTrue(result.can_claim_success)
+        focus_verifier.assert_called_once_with("Chrome")
 
     def test_explicit_verified_tool_result_is_not_reverified(self):
         result = verify_postcondition(
