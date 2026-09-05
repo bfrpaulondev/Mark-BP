@@ -37,6 +37,17 @@ class CostPricingTests(unittest.TestCase):
 
         self.assertEqual(estimate_usage_cost_usd(usage, pricing), 0.0037)
 
+    def test_estimate_uses_provider_normalized_billable_output(self):
+        usage = ProviderUsage(
+            input_tokens=100,
+            output_tokens=20,
+            reasoning_tokens=10,
+            billable_output_tokens=30,
+        )
+        pricing = ModelPricing(input_per_million=1.0, output_per_million=2.0)
+
+        self.assertEqual(estimate_usage_cost_usd(usage, pricing), 0.00016)
+
     def test_missing_required_cached_rate_is_unknown_not_assumed(self):
         usage = ProviderUsage(
             input_tokens=1_000,
@@ -72,9 +83,10 @@ class CostPricingTests(unittest.TestCase):
             resolve_model_pricing(config, provider="gemini", model="unknown")
         )
 
-    def test_invalid_or_negative_prices_are_not_accepted(self):
-        pricing = parse_model_pricing({"input": -1, "output": "invalid"})
-        self.assertIsNone(pricing)
+    def test_invalid_negative_nan_and_infinite_prices_are_not_accepted(self):
+        self.assertIsNone(parse_model_pricing({"input": -1, "output": "invalid"}))
+        self.assertIsNone(parse_model_pricing({"input": "nan"}))
+        self.assertIsNone(parse_model_pricing({"output": "inf"}))
 
 
 class CostTelemetryTaskTests(unittest.TestCase):
@@ -135,6 +147,7 @@ class CostTelemetryTaskTests(unittest.TestCase):
         self.assertEqual(snapshot["total_latency_ms"], 200)
         self.assertEqual(snapshot["input_tokens"], 100)
         self.assertEqual(snapshot["output_tokens"], 25)
+        self.assertEqual(snapshot["billable_output_tokens"], 25)
         self.assertEqual(snapshot["duration_ms"], 500)
         # Failed provider attempts do not expose authoritative usage/cost, so the
         # overall task estimate stays incomplete rather than pretending precision.
@@ -183,6 +196,15 @@ class CostTelemetryTaskTests(unittest.TestCase):
         recent_ids = [item["task_id"] for item in self.telemetry.recent_snapshots(limit=10)]
         self.assertEqual(len(recent_ids), 3)
         self.assertNotIn("bounded", recent_ids)
+
+    def test_arbitrary_task_text_is_hashed_instead_of_persisted(self):
+        secret = "customer password is hunter2"
+        task_id = self.telemetry.start_task(secret)
+        snapshot = self.telemetry.snapshot(task_id)
+
+        self.assertTrue(task_id.startswith("task-"))
+        self.assertNotIn(secret, task_id)
+        self.assertNotIn(secret, str(snapshot))
 
     def test_snapshot_has_no_arbitrary_content_fields(self):
         task_id = self.telemetry.start_task("privacy")
