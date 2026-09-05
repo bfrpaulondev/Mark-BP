@@ -39,7 +39,6 @@ def _ui_state_values() -> list[str]:
 
 
 WINDOW_STATES = _ui_state_values()
-
 DIALOG_CASES = ("empty", "awaiting_approval", "failed", "done")
 
 
@@ -70,9 +69,11 @@ def render_all(out_dir: Path) -> list[Path]:
     window.show()
     app.processEvents()
 
-    # Host log gets synthetic content so the log column renders a realistic
-    # (but private-free) surface.
-    for line in ("SYS: sessão de demonstração", "TU: exemplo sintético", "Antonella: resposta sintética"):
+    for line in (
+        "SYS: sessão de demonstração",
+        "TU: exemplo sintético",
+        "Antonella: resposta sintética",
+    ):
         window._log.append_event(line)
     app.processEvents()
 
@@ -134,6 +135,19 @@ def render_all(out_dir: Path) -> list[Path]:
         saved.append(_grab(dialog, out_dir, f"agent_{case}"))
         dialog.close()
         dialog.deleteLater()
+
+    from ui.settings_dialog import AntonellaSettingsDialog
+
+    settings = AntonellaSettingsDialog(host)
+    # Privacy: provider keys are rendered only as readiness booleans; force
+    # the only user-configurable visible string to synthetic content.
+    if getattr(settings, "_voice", None) is not None:
+        settings._voice.setText("Voz de demonstração")
+    settings.show()
+    app.processEvents()
+    saved.append(_grab(settings, out_dir, "settings"))
+    settings.close()
+    settings.deleteLater()
 
     window.hide()
     window.close()

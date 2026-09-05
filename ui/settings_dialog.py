@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeyEvent
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from config import get_config
@@ -24,6 +25,7 @@ _BG = "#05060b"
 _SURFACE = "#080910"
 _SURFACE_2 = "#0b0c15"
 _BORDER = "#24263a"
+_BORDER_HOVER = "#35384f"
 _TEXT = "#f5f2ff"
 _MUTED = "#8f93b8"
 _FAINT = "#626782"
@@ -35,6 +37,22 @@ _GREEN = "#68e6b2"
 # -.-.-.-
 def _font(size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
     return QFont("Segoe UI Variable", size, weight)
+
+
+class ExplicitCommitButton(QPushButton):
+    """Commit control that never treats Enter or Return as activation.
+
+    Keyboard navigation remains available and Space keeps the normal Qt
+    push-button activation semantics. This mirrors the fail-closed approval
+    control without removing keyboard accessibility.
+    """
+
+    # -.-.-.-
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class AntonellaSettingsDialog(QDialog):
@@ -89,7 +107,7 @@ class AntonellaSettingsDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch()
         cancel = QPushButton("Cancelar")
-        apply_button = QPushButton("Aplicar")
+        apply_button = ExplicitCommitButton("Aplicar")
         for button in (cancel, apply_button):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setMinimumHeight(38)
@@ -97,17 +115,33 @@ class AntonellaSettingsDialog(QDialog):
         cancel.setStyleSheet(
             f"QPushButton{{background:{_SURFACE_2};color:{_MUTED};border:1px solid {_BORDER};"
             "border-radius:9px;padding:0 16px;}"
+            f"QPushButton:focus{{color:{_TEXT};border-color:{_BORDER_HOVER};outline:none;}}"
         )
         apply_button.setStyleSheet(
             f"QPushButton{{background:{_VIOLET};color:#09060f;border:0;border-radius:9px;"
             "padding:0 18px;font-weight:700;}"
             f"QPushButton:hover{{background:{_VIOLET_SOFT};}}"
+            f"QPushButton:focus{{background:{_VIOLET_SOFT};outline:none;}}"
         )
+
+        # Settings commit must be an explicit action. Disabling QDialog's
+        # default-button promotion is necessary but not sufficient: the
+        # focused commit button also consumes Return/Enter itself.
+        cancel.setAutoDefault(False)
+        cancel.setDefault(False)
+        apply_button.setAutoDefault(False)
+        apply_button.setDefault(False)
+        cancel.setAccessibleName("Cancelar alterações")
+        apply_button.setAccessibleName("Aplicar preferências")
+
         cancel.clicked.connect(self.reject)
         apply_button.clicked.connect(self._apply)
         buttons.addWidget(cancel)
         buttons.addWidget(apply_button)
         root.addLayout(buttons)
+
+        # Keyboard order: cancel (safe) before apply (commit).
+        QWidget.setTabOrder(cancel, apply_button)
 
     def _card(self) -> tuple[QFrame, QVBoxLayout]:
         card = QFrame()
