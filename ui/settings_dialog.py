@@ -24,6 +24,7 @@ _BG = "#05060b"
 _SURFACE = "#080910"
 _SURFACE_2 = "#0b0c15"
 _BORDER = "#24263a"
+_BORDER_HOVER = "#35384f"
 _TEXT = "#f5f2ff"
 _MUTED = "#8f93b8"
 _FAINT = "#626782"
@@ -97,17 +98,34 @@ class AntonellaSettingsDialog(QDialog):
         cancel.setStyleSheet(
             f"QPushButton{{background:{_SURFACE_2};color:{_MUTED};border:1px solid {_BORDER};"
             "border-radius:9px;padding:0 16px;}"
+            f"QPushButton:focus{{color:{_TEXT};border-color:{_BORDER_HOVER};outline:none;}}"
         )
         apply_button.setStyleSheet(
             f"QPushButton{{background:{_VIOLET};color:#09060f;border:0;border-radius:9px;"
-            "padding:0 18px;font-weight:700;}"
+            "padding:0 18px;font-weight:700;}}"
             f"QPushButton:hover{{background:{_VIOLET_SOFT};}}"
+            f"QPushButton:focus{{background:{_VIOLET_SOFT};outline:none;}}"
         )
+
+        # Settings commit must be an explicit action: no auto-default Return
+        # target inside this dialog, visible focus on both buttons.
+        cancel.setAutoDefault(False)
+        cancel.setDefault(False)
+        apply_button.setAutoDefault(False)
+        apply_button.setDefault(False)
+        cancel.setAccessibleName("Cancelar alterações")
+        apply_button.setAccessibleName("Aplicar preferências")
+
         cancel.clicked.connect(self.reject)
         apply_button.clicked.connect(self._apply)
         buttons.addWidget(cancel)
         buttons.addWidget(apply_button)
         root.addLayout(buttons)
+
+        # Keyboard order: cancel (safe) before apply (commit).
+        from PyQt6.QtWidgets import QWidget as _QWidget
+
+        _QWidget.setTabOrder(cancel, apply_button)
 
     def _card(self) -> tuple[QFrame, QVBoxLayout]:
         card = QFrame()

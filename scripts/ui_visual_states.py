@@ -135,6 +135,19 @@ def render_all(out_dir: Path) -> list[Path]:
         dialog.close()
         dialog.deleteLater()
 
+    from ui.settings_dialog import AntonellaSettingsDialog
+
+    settings = AntonellaSettingsDialog(host)
+    # Privacy: the keys card renders booleans only, but the voice field
+    # would show the real configured value — force synthetic content.
+    if getattr(settings, "_voice", None) is not None:
+        settings._voice.setText("Voz de demonstração")
+    settings.show()
+    app.processEvents()
+    saved.append(_grab(settings, out_dir, "settings"))
+    settings.close()
+    settings.deleteLater()
+
     window.hide()
     window.close()
     window.deleteLater()

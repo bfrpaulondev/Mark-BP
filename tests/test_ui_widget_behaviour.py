@@ -269,5 +269,60 @@ class MainWindowClampTests(unittest.TestCase):
         self.assertLessEqual(log.document().blockCount(), 401)
 
 
+@unittest.skipUnless(HAS_QT, "PyQt6 unavailable: dependency-free CI legs skip")
+class SettingsDialogTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._app = QApplication.instance() or QApplication([])
+        import ui.settings_dialog as settings_module
+
+        cls._settings_module = settings_module
+        cls._dialog_cls = settings_module.AntonellaSettingsDialog
+
+    def setUp(self):
+        # Spy on the module-level preference applier so clicks never touch
+        # the real session environment.
+        self.applied: list[dict] = []
+        self._original_apply = self._settings_module.apply_session_preferences
+        self._settings_module.apply_session_preferences = lambda **kwargs: (
+            self.applied.append(kwargs),
+            {"changed": [], "restart_required": []},
+        )[1]
+        self._host = QWidget()
+        self.dialog = self._dialog_cls(self._host)
+        self.dialog.show()
+
+    def tearDown(self):
+        self._settings_module.apply_session_preferences = self._original_apply
+        self.dialog.close()
+        self.dialog.deleteLater()
+        self._host.deleteLater()
+
+    # -.-.-.-
+    def _buttons(self) -> dict[str, QPushButton]:
+        return {button.text(): button for button in self.dialog.findChildren(QPushButton)}
+
+    def test_constructs_and_commit_is_never_a_keyboard_default(self):
+        self.assertTrue(self.dialog.isVisible())
+        cancel, apply_button = self._buttons()["Cancelar"], self._buttons()["Aplicar"]
+        self.assertFalse(apply_button.autoDefault())
+        self.assertFalse(apply_button.isDefault())
+        self.assertFalse(cancel.autoDefault())
+        self.assertEqual(apply_button.accessibleName(), "Aplicar preferências")
+
+    def test_enter_return_fail_closed_at_dialog_level(self):
+        QTest.keyClick(self.dialog, Qt.Key.Key_Return)
+        QTest.keyClick(self.dialog, Qt.Key.Key_Enter)
+        self.assertEqual(self.applied, [])
+
+    def test_explicit_click_applies_once(self):
+        self._buttons()["Aplicar"].click()
+        self.assertEqual(len(self.applied), 1)
+
+    def test_tab_order_cancel_before_apply(self):
+        cancel, apply_button = self._buttons()["Cancelar"], self._buttons()["Aplicar"]
+        self.assertIs(cancel.nextInFocusChain(), apply_button)
+
+
 if __name__ == "__main__":
     unittest.main()
