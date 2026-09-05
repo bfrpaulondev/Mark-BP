@@ -70,11 +70,12 @@ A PR #26 introduziu os primeiros verifiers específicos, mantendo o fallback fai
 - só promove a `verified=true` quando observa novo PID, nova janela ou mudança de foreground para o alvo;
 - uma aplicação que já estava aberta sem transição observável permanece `verified=false`;
 - o launcher Windows deixa de usar `shell=True`: executáveis usam argumentos estruturados e apenas `ms-settings:` é aceite como URI conhecida;
+- `computer_control.focus_window` deixa de interpolar o título num comando PowerShell e usa enumeração/foco Win32 com o título tratado apenas como texto;
 - `computer_control.focus_window` compara o título solicitado com a janela foreground real;
 - o Local Fast Path também revalida `open_app` antes de usar wording de sucesso;
 - em plataformas sem o verifier específico, mantém `verified=false` em vez de inventar sucesso.
 
-Validação local desta continuação: 159 testes passaram em Python 3.11 no ambiente bloqueado por `uv.lock`; compilação e `git diff --check` passaram. O E2E Windows não foi executado. Ainda faltam nesta família minimize/maximize/switch com pre-state/target identity robustos; não marcar ANT-254 como concluída até cobrir/limitar esses casos e passar CI/E2E apropriados.
+Validação local desta continuação: 162 testes passaram em Python 3.11 no ambiente bloqueado por `uv.lock`; compilação, `uv lock --check` e `git diff --check` passaram. Inclui regressões que garantem que `focus_window` não invoca PowerShell e trata texto semelhante a comandos apenas como título literal. O E2E Windows não foi executado. Ainda faltam nesta família minimize/maximize/switch com pre-state/target identity robustos; não marcar ANT-254 como concluída até cobrir/limitar esses casos e passar CI/E2E apropriados.
 
 ## Implementação integrada — Realtime Computer Use económico (E2E pendente)
 
