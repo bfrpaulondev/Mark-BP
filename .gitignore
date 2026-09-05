@@ -25,3 +25,6 @@ desktop.ini
 
 # ANT-270 visual regression output
 visual_states/
+
+# Windows E2E physical reports
+windows_e2e_reports/
