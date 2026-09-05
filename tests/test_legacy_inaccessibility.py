@@ -12,7 +12,6 @@ class LegacyInaccessibilityTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.legacy = (ROOT / "ui.py").read_text(encoding="utf-8")
         cls.entrypoints = {
             name: (ROOT / name).read_text(encoding="utf-8")
             for name in ("antonella.py", "main.py")
@@ -27,10 +26,10 @@ class LegacyInaccessibilityTests(unittest.TestCase):
             self.skipTest("PyQt6 unavailable: dependency-free CI leg")
         self.assertTrue(str(ui.__file__).replace("\\", "/").endswith("ui/__init__.py"))
 
-    def test_legacy_file_is_inert_when_executed_directly(self):
-        # `python ui.py` defines classes and exits: no main guard, no side
-        # effects at module scope beyond definitions.
-        self.assertNotIn('__name__ == "__main__"', self.legacy)
+    def test_legacy_file_is_removed(self):
+        # B4: the legacy module is gone — there is nothing left to execute
+        # or import accidentally.
+        self.assertFalse((ROOT / "ui.py").exists())
 
     def test_entrypoints_import_the_ui_package(self):
         for name, source in self.entrypoints.items():
