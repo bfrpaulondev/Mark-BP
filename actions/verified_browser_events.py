@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import re
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,9 @@ def _safe_filename(value: str | None) -> str:
     """Collapse a browser-supplied filename to a safe leaf name."""
     raw = Path(str(value or "download")).name
     cleaned = _INVALID_FILENAME.sub("_", raw).strip(" .")
-    return (cleaned or "download")[:180]
+    if not cleaned or not any(ch.isalnum() for ch in cleaned):
+        return "download"
+    return cleaned[:180]
 
 
 # -.-.-.-
@@ -55,7 +58,7 @@ def _next_download_path(filename: str) -> Path:
         alternative = downloads / f"{stem} ({index}){suffix}"
         if not alternative.exists():
             return alternative
-    return downloads / f"{stem}-{int(asyncio.get_event_loop().time() * 1000)}{suffix}"
+    return downloads / f"{stem}-{time.time_ns()}{suffix}"
 
 
 # -.-.-.-
@@ -216,15 +219,17 @@ async def _verify_popup(session, params: Mapping[str, Any]) -> str:
 
     timeout_ms = _bounded_int(params.get("timeout_ms"), 8000, 1000, 15000)
     before_count = len(page.context.pages)
+    clicked = False
     try:
         async with page.expect_popup(timeout=timeout_ms) as popup_info:
             await locator.click(timeout=timeout_ms)
+            clicked = True
         popup = await popup_info.value
     except Exception as exc:
         return _result(
             "click_popup",
             ok=False,
-            delivered=True,
+            delivered=clicked,
             verified=False,
             error=f"Popup was not verified after the click: {type(exc).__name__}",
             evidence={"method": method, "before_page_count": before_count},
@@ -237,14 +242,14 @@ async def _verify_popup(session, params: Mapping[str, Any]) -> str:
     after_count = len(page.context.pages)
     snapshot = await _page_snapshot(popup)
     popup_open = not popup.is_closed()
-    verified = bool(popup_open and after_count >= before_count + 1)
+    verified = bool(clicked and popup_open and after_count >= before_count + 1)
     if verified and bool(params.get("follow_popup", True)):
         session._page = popup
 
     return _result(
         "click_popup",
         ok=verified,
-        delivered=True,
+        delivered=clicked,
         verified=verified,
         message=(
             "Popup creation was correlated with the click and verified."
@@ -269,31 +274,37 @@ async def _verify_download(session, params: Mapping[str, Any]) -> str:
         return _result("click_download", ok=False, delivered=False, verified=False, error="No matching download trigger was found.")
 
     timeout_ms = _bounded_int(params.get("timeout_ms"), 10000, 1000, 20000)
+    clicked = False
     try:
         async with page.expect_download(timeout=timeout_ms) as download_info:
             await locator.click(timeout=timeout_ms)
+            clicked = True
         download = await download_info.value
     except Exception as exc:
         return _result(
             "click_download",
             ok=False,
-            delivered=True,
+            delivered=clicked,
             verified=False,
             error=f"Download event was not verified after the click: {type(exc).__name__}",
             evidence={"method": method},
         )
 
+    failure_checked = False
+    failure: str | None = None
     try:
         failure = await download.failure()
+        failure_checked = True
     except Exception:
-        failure = None
+        failure_checked = False
+
     suggested = _safe_filename(getattr(download, "suggested_filename", "download"))
     extension = Path(suggested).suffix.lower()[:20]
     save_requested = bool(params.get("save_download", False))
     saved = False
     size_bytes: int | None = None
 
-    if save_requested and failure is None:
+    if save_requested and failure_checked and failure is None:
         try:
             destination = _next_download_path(suggested)
             await download.save_as(str(destination))
@@ -310,11 +321,16 @@ async def _verify_download(session, params: Mapping[str, Any]) -> str:
                 evidence={"method": method, "download_event": True, "saved": False, "extension": extension},
             )
 
-    verified = bool(failure is None and (not save_requested or saved))
+    verified = bool(
+        clicked
+        and failure_checked
+        and failure is None
+        and (not save_requested or saved)
+    )
     return _result(
         "click_download",
         ok=verified,
-        delivered=True,
+        delivered=clicked,
         verified=verified,
         message=(
             "Download event verified and file persisted in Downloads."
@@ -326,11 +342,12 @@ async def _verify_download(session, params: Mapping[str, Any]) -> str:
         evidence={
             "method": method,
             "download_event": True,
+            "failure_checked": failure_checked,
             "save_requested": save_requested,
             "saved": saved,
             "extension": extension,
             "size_bytes": size_bytes,
-            "download_failure": bool(failure),
+            "download_failure": (failure is not None) if failure_checked else None,
         },
     )
 
