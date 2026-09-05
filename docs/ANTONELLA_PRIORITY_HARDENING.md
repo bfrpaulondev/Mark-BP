@@ -47,15 +47,15 @@ quando não pode → informa claramente sem inventar sucesso
 
 - [x] **ANT-268 — Estados operacionais explícitos na UI.** PR #37 integrada após principal review; estados desconhecidos permanecem conservadores em vez de aparecerem como PRONTA.
 - [x] **ANT-269 — Evoluir Agent Control Center.** PR #42 integrada após principal review/correcções: progresso/timeline/evidência/janela alvo, custo ANT-264 e Stop/Approve contextuais sem inventar percentagens/custo.
-- [ ] **ANT-270 — Hardening UI Windows.** PR #44 integrou a primeira fatia após principal review: focus/accessibility, clamp multi-monitor, CI Qt Windows e aprovação fail-closed onde Enter/Return nunca concede autorização, mantendo Space/click explícitos. Continuam pendentes sizing/responsividade mais profunda, visual regression, empty/error polish, microtransições, performance de repaint e validação física DPI/multi-monitor no ANT-275.
-- [ ] **ANT-271 — Sincronizar voz com verificação.** Nunca falar sucesso antes do verifier; melhorar barge-in, cancelamento, silêncio/end-of-turn e progresso falado conciso.
-- [ ] **ANT-272 — Limpar identidade herdada.** Remover gradualmente resíduos JARVIS/Mark visíveis ou internos onde não sejam necessários para compatibilidade.
+- [x] **ANT-270 — Hardening UI Windows, escopo automático.** PR #44 integrou focus/accessibility, clamp multi-monitor e aprovação fail-closed; PR #49 integrou sizing exequível, histórico bounded, orb visibility-aware, empty/error states e visual regression offscreen; PR #54 integrou a fatia de Preferências com commit explícito onde Enter/Return não aplicam mesmo com o botão focado, mantendo Space/click. DPI/multi-monitor físico e benchmark real continuam no ANT-275 e não são confundidos com CI offscreen.
+- [ ] **ANT-271 — Sincronizar voz com verificação.** A camada pura de feedback foi integrada pela PR #55 após principal review: só uma instância canónica de `ExecutionResult` pode produzir fala de sucesso; mappings arbitrários falham fechado. Continuam pendentes wiring no TTS vivo, barge-in real, cancelamento coerente da fila de fala, silêncio/end-of-turn e progresso falado conciso; áudio físico pertence ao ANT-275.
+- [ ] **ANT-272 — Limpar identidade herdada.** PR #51 integrou a limpeza segura das superfícies vivas relevantes e mascara o token exacto legado `MARK LI` sem corromper nomes pessoais “Mark”. O módulo monolítico legado `ui.py` continua fora do runtime actual e ainda contém referências internas/visíveis antigas; não se considera esta tarefa totalmente concluída até esse legado ser removido/migrado ou provado definitivamente inacessível.
 
 ## P1/P2 — testes e observabilidade
 
 - [x] **ANT-273 — Windows CI, primeira fatia.** PR #40 integrada após principal review: Windows Python 3.11/3.12, compile/unit/import-smoke fail-closed e paridade essencial com Ubuntu. Ruff/typecheck/coverage/audits continuam como follow-ups; isto não substitui ANT-275 físico.
-- [ ] **ANT-274 — Structured logging completo.** PR #53 em principal review: schema JSON bounded, correlation/task ID, tool/stage, provider/model, latência/custo/tokens, `verified`/delivery, erro por classe/tipo, retry/fallback, recovery reason codes e redaction content-minimised. Orchestrator, CostTelemetry/provider attempts e Computer Use recovery já estão ligados nesta branch; integração depende de CI/review final.
-- [ ] **ANT-275 — Matriz E2E Windows real.** Voz, browser real, UIA, Computer Use, multi-monitor/DPI e cenários visuais desconhecidos/remotos; distinguir sempre unit/integration/CI de E2E físico.
+- [x] **ANT-274 — Structured logging do caminho crítico.** PR #53 integrada após principal review e CI final: schema JSON bounded/estrito, correlation/task ID, tool/stage, provider/model, latência/custo/tokens, `verified`/delivery, erro por classe/tipo sem mensagem/traceback, retry/fallback, recovery reason codes e redaction content-minimised. Orchestrator, CostTelemetry/provider attempts e Computer Use recovery estão ligados; prints legados restantes não são tratados como concluídos por associação.
+- [ ] **ANT-275 — Matriz E2E Windows real.** Voz, browser real, UIA, Computer Use, multi-monitor/DPI e cenários visuais desconhecidos; distinguir sempre unit/integration/CI de E2E físico. A primeira fatia de harness/fixture está em desenvolvimento separado e ainda não substitui execução no hardware real.
 
 ## P2 — inteligência persistente depois do core confiável
 
@@ -67,8 +67,8 @@ quando não pode → informa claramente sem inventar sucesso
 
 1. ANT-251–263 — execução verificável + core de agente integrados;
 2. ANT-264–267 — custo + percepção + Computer Use reliability genérico;
-3. ANT-268–272 — UI/voz/identidade em paralelo com GLM e principal review;
-4. ANT-273–275 — CI/observabilidade/E2E, com primeira fatia Windows CI já integrada;
+3. ANT-268–272 — UI/voz/identidade com principal review; ANT-270 fechado no escopo automático, ANT-271/272 ainda têm follow-ups explícitos;
+4. ANT-273–275 — CI/observabilidade/E2E, com ANT-273 e ANT-274 integrados e ANT-275 físico ainda aberto;
 5. ANT-276–278 — memória/skills/tasks persistentes;
 6. retomar a sequência MT5/Fimathe do plano mestre quando os gates anteriores estiverem verdes.
 
