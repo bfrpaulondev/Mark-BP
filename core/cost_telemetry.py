@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 import threading
@@ -12,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.providers.contracts import ProviderUsage
+from core.structured_logging import get_logger, log_event, log_provider_attempt
 
 
 _MAX_TASKS = 256
@@ -312,6 +314,26 @@ class CostTelemetry:
             if len(state.events) > self._max_events:
                 del state.events[: len(state.events) - self._max_events]
             self._tasks.move_to_end(selected)
+
+        try:
+            log_provider_attempt(
+                get_logger("provider"),
+                task_id=selected,
+                provider=event.provider,
+                model=event.model,
+                capability=event.capability,
+                role=event.role,
+                attempt=event.attempt,
+                latency_ms=event.latency_ms,
+                ok=event.ok,
+                retry=event.retry,
+                fallback=event.fallback,
+                cost_usd=event.estimated_cost_usd,
+                usage=safe_usage.safe_metadata(),
+                error_class=event.error_class,
+            )
+        except Exception:
+            pass
         return estimate
 
     # -.-.-.-
@@ -341,10 +363,39 @@ class CostTelemetry:
             state = self._tasks.get(selected)
             if state is None:
                 return None
-            if not state.finished_at:
+            just_finished = not bool(state.finished_at)
+            if just_finished:
                 state.finished_at = float(self._wall_clock())
                 state.finished_monotonic = float(self._monotonic())
-            return self._snapshot_locked(state)
+            snapshot = self._snapshot_locked(state)
+
+        if just_finished:
+            try:
+                log_event(
+                    get_logger("provider"),
+                    logging.INFO,
+                    "provider.task_finished",
+                    task_id=selected,
+                    duration_ms=int(snapshot.get("duration_ms") or 0),
+                    latency_ms=int(snapshot.get("total_latency_ms") or 0),
+                    cost_usd=snapshot.get("estimated_cost_usd"),
+                    cost_complete=bool(snapshot.get("cost_complete", False)),
+                    input_tokens=int(snapshot.get("input_tokens") or 0),
+                    output_tokens=int(snapshot.get("output_tokens") or 0),
+                    cached_input_tokens=int(snapshot.get("cached_input_tokens") or 0),
+                    reasoning_tokens=int(snapshot.get("reasoning_tokens") or 0),
+                    total_tokens=int(snapshot.get("total_tokens") or 0),
+                    billable_output_tokens=int(snapshot.get("billable_output_tokens") or 0),
+                    retry=int(snapshot.get("retries") or 0) > 0,
+                    fallback=int(snapshot.get("fallback_attempts") or 0) > 0,
+                    ok=(
+                        int(snapshot.get("successful_calls") or 0) > 0
+                        or int(snapshot.get("provider_attempts") or 0) == 0
+                    ),
+                )
+            except Exception:
+                pass
+        return snapshot
 
     # -.-.-.-
     def snapshot(self, task_id: str) -> dict[str, Any] | None:

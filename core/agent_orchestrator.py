@@ -11,6 +11,7 @@ from core.execution_engine import ExecutionEngine
 from core.execution_result import ExecutionResult
 from core.human_approval import ApprovalRequest, HumanApprovalManager, get_human_approval_manager
 from core.policy_engine import PolicyDecision, PolicyEffect, PolicyEngine
+from core.structured_logging import log_orchestration_event
 from core.tool_router import ToolRouter
 
 
@@ -95,7 +96,7 @@ class AgentOrchestrator:
         self._requires_postcondition = requires_postcondition
         self._capture_postcondition_state = capture_postcondition_state
         self._verify_postcondition = verify_postcondition
-        self._event_sink = event_sink
+        self._event_sink = event_sink or log_orchestration_event
         self._tool_router = tool_router or ToolRouter()
         self._execution_engine = execution_engine or ExecutionEngine()
         self._policy_engine = policy_engine or PolicyEngine()
@@ -211,7 +212,11 @@ class AgentOrchestrator:
                 AgentStage.FAILED,
                 name,
                 detail="executor_exception",
-                metadata={"error_type": type(exc).__name__},
+                metadata={
+                    "error": True,
+                    "error_type": type(exc).__name__,
+                    "executed": False,
+                },
             )
             raise
 
@@ -257,8 +262,13 @@ class AgentOrchestrator:
             detail="tool_lifecycle_complete",
             metadata={
                 "duration_ms": duration_ms,
+                "ok": execution.ok if execution is not None else True,
+                "delivered": execution.delivered if execution is not None else None,
                 "verified": execution.verified if execution is not None else None,
-                "can_claim_success": execution.can_claim_success if execution is not None else None,
+                "can_claim_success": execution.can_claim_success if execution is not None else True,
+                "requires_approval": execution.requires_approval if execution is not None else False,
+                "executed": True,
+                "error": bool(execution.error) if execution is not None else False,
                 "policy_effect": decision.effect.value,
             },
         )
@@ -335,9 +345,14 @@ class AgentOrchestrator:
             detail=detail,
             metadata={
                 "duration_ms": duration_ms,
+                "ok": False,
+                "delivered": False,
+                "verified": False,
+                "can_claim_success": False,
                 "policy_effect": decision.effect.value,
                 "requires_approval": request is not None,
                 "executed": False,
+                "error": True,
             },
         )
         return ToolOrchestrationOutcome(
@@ -386,8 +401,6 @@ class AgentOrchestrator:
             metadata=dict(metadata or {}),
         )
         events.append(event)
-        if self._event_sink is None:
-            return
         try:
             self._event_sink(event)
         except Exception:
