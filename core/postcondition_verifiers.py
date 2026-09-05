@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import unicodedata
 from collections.abc import Mapping
 from typing import Any
 
@@ -59,7 +60,9 @@ _WINDOWS_APP_PROCESSES: dict[str, set[str]] = {
 
 # -.-.-.-
 def _normalize_app_name(value: str) -> str:
-    return " ".join(str(value or "").strip().lower().split())
+    raw = " ".join(str(value or "").strip().lower().split())
+    normalized = unicodedata.normalize("NFKD", raw)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
 # -.-.-.-
