@@ -6,7 +6,7 @@ from core.computer_use.contracts import ComputerAction, FrameSnapshot
 
 
 _COORDINATE_ACTIONS = {"click", "double_click", "right_click", "move"}
-_CONTENT_SENSITIVE_ACTIONS = {"type", "smart_type"}
+_STATE_SENSITIVE_ACTIONS = {"type", "smart_type", "hotkey", "press", "done", "fail"}
 _RETRY_SAFE_ACTIONS = {"scroll"}
 
 
@@ -116,15 +116,15 @@ def action_plan_is_stale(
     planned: FrameSnapshot,
     latest: FrameSnapshot,
 ) -> bool:
-    """Invalidate only assumptions that are unsafe after a meaningful visual update.
+    """Invalidate unsafe assumptions after a newer meaningful visual observation.
 
-    Coordinate and text-entry actions depend directly on the planned visual state. Other
-    actions are invalidated only if the capture geometry/scope/topology changed, avoiding
-    endless replans on animated content while still failing closed on window/display moves.
+    Coordinates, focus-sensitive keyboard/text actions and terminal planner decisions are
+    invalidated by any newer emitted frame. Scroll may tolerate benign animation, but still
+    invalidates if the capture geometry, scope, monitor or display topology changed.
     """
     if not frame_is_superseded(planned, latest):
         return False
-    if action.action in _COORDINATE_ACTIONS or action.action in _CONTENT_SENSITIVE_ACTIONS:
+    if action.action in _COORDINATE_ACTIONS or action.action in _STATE_SENSITIVE_ACTIONS:
         return True
     return (
         planned.left != latest.left
