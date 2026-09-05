@@ -229,6 +229,7 @@ class AgentControlDialog(QDialog):
         root.addLayout(stats)
 
         self._details_toggle = QPushButton("▸ Detalhes técnicos")
+        self._details_toggle.setAccessibleName("Detalhes técnicos")
         self._details_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self._details_toggle.setFont(_font(8, QFont.Weight.DemiBold))
         self._details_toggle.setStyleSheet(
@@ -342,23 +343,28 @@ class AgentControlDialog(QDialog):
     # -.-.-.-
     def _stop(self) -> None:
         result = self._session.stop()
-        self._notice.setText("Pedido de paragem enviado. O agente termina no próximo ponto seguro.")
+        self._set_notice("Pedido de paragem enviado. O agente termina no próximo ponto seguro.")
         self._write_host_log("SYS: Computer Use · paragem solicitada pela interface")
         if not result.get("ok"):
-            self._notice.setText(str(result.get("error") or "Não foi possível parar o agente."))
+            self._set_notice(str(result.get("error") or "Não foi possível parar o agente."), _RED)
         self.refresh()
 
     # -.-.-.-
     def _approve(self) -> None:
         result = self._session.approve_once()
         if result.get("ok"):
-            self._notice.setText("Aprovação concedida apenas para o passo actualmente pendente.")
+            self._set_notice("Aprovação concedida apenas para o passo actualmente pendente.", _GREEN)
             self._write_host_log("SYS: Computer Use · um passo aprovado pela interface")
         else:
-            self._notice.setText(str(result.get("error") or "O agente não aguarda aprovação."))
+            self._set_notice(str(result.get("error") or "O agente não aguarda aprovação."), _RED)
         self.refresh()
 
     # -.-.-.-
+    # -.-.-.-
+    def _set_notice(self, message: str, color: str = _PINK) -> None:
+        self._notice.setText(message)
+        self._notice.setStyleSheet(f"color:{color};")
+
     def _write_host_log(self, text: str) -> None:
         try:
             self._host._log.append_event(text)
@@ -414,7 +420,7 @@ class AgentControlDialog(QDialog):
         try:
             status = self._session.status()
         except Exception as exc:
-            self._notice.setText(f"Estado indisponível · {type(exc).__name__}")
+            self._set_notice(f"Estado indisponível · {type(exc).__name__}", _RED)
             return
 
         state = str(status.get("state") or "idle").lower()
@@ -500,15 +506,19 @@ class AgentControlDialog(QDialog):
             self._approve_button.setText("APROVAR 1 PASSO")
 
         if state == "awaiting_approval":
-            self._notice.setText(
-                f"Aprovação necessária para: {pending or 'passo sensível'}"
+            self._set_notice(
+                f"Aprovação necessária para: {pending or 'passo sensível'}", _PINK
             )
         elif state == "failed":
-            self._notice.setText(str(status.get("last_error") or "A tarefa falhou."))
+            self._set_notice(
+                str(status.get("last_error") or "A tarefa falhou."), _RED
+            )
         elif state == "done":
-            self._notice.setText(str(status.get("result") or "Tarefa concluída."))
+            self._set_notice(
+                str(status.get("result") or "Tarefa concluída."), _GREEN
+            )
         elif state not in _ACTIVE_STATES:
-            self._notice.setText("")
+            self._set_notice("", _PINK)
 
 
 # -.-.-.-

@@ -1,53 +1,60 @@
 # Windows UI Hardening (ANT-270)
 
-Estado: **fatia 1 de várias** — foco, acessibilidade, fail-closed de teclado
-e multi-monitor. A validação final desta fatia deve correr contra a `main`
-actual antes da integração.
+Estado: **fatia 2 de várias** — sizing honesto, empty/error states, orbe
+económico, histórico limitado e visual regression offscreen. A fatia 1
+(foco, acessibilidade, fail-closed de teclado, multi-monitor) já foi
+integrada com as correcções do Principal Agent (`ApprovalButton` incluído).
 
-## Fatia 1 (esta)
+## Fatia 2 (esta)
 
-- **Acessibilidade**: nomes acessíveis nos botões só-ícone ("Abrir
-  definições", "Interromper resposta", "Pausar ou retomar microfone") e nos
-  botões do painel do agente; estilos `:focus` visíveis em todos os botões.
-- **Tab order**: barra de comandos segue a ordem visual
-  (comando → interromper → microfone); painel do agente mantém navegação por
-  teclado entre aprovar → parar → fechar.
-- **Fail-closed de teclado na aprovação**: `QDialog` promove `QPushButton` a
-  alvos auto-default de Return/Enter, por isso os botões têm explicitamente
-  `setAutoDefault(False)` + `setDefault(False)`. Além disso, o controlo de
-  aprovação usa `ApprovalButton`, que consome `Return` e `Enter` mesmo quando
-  o próprio botão tem foco. Assim essas teclas nunca chamam `approve_once()`.
-  Acessibilidade por teclado é preservada: `Space` continua a activar o botão
-  quando ele está focado e habilitado, e o clique explícito continua válido.
-  O botão só fica habilitado em `awaiting_approval`.
-- **Multi-monitor**: `AntonellaWindow` liga `windowHandle().screenChanged`
-  no primeiro `showEvent` e recoloca a janela dentro da
-  `availableGeometry()` do novo ecrã (clamp por `frameGeometry`).
+- **Sizing honesto**: o `minimumSizeHint` real era 988×522 contra um mínimo
+  declarado de 980×650 (o mínimo do orb de 360 px era inatingível com os
+  painéis fixos). O orb passa a 320×320 (948 ≤ 980) e testes comportamentais
+  garantem `minimumSizeHint ≤ declarado` e widgets dentro da viewport ao
+  tamanho mínimo.
+- **Orb económico**: o timer de 30 FPS liga/desliga com a visibilidade da
+  janela (`showEvent`/`hideEvent`) — janela escondida não gasta CPU.
+  NOT PHYSICALLY BENCHMARKED (offscreen não mede CPU real).
+- **Histórico limitado**: `LogView` com `document().setMaximumBlockCount(400)`
+  — a coluna de registo já não cresce sem limite (bounded memory).
+- **Empty states (Agent Control Center)**: sem tarefa → "Nenhuma tarefa
+  activa", sem provider/target → "—", sem timeline → placeholder explícito;
+  nenhum dado inventado.
+- **Error states**: a notice do painel segue a cor do estado (rosa =
+  aprovação, vermelho = falha, verde = concluído) com mensagem humana em
+  primeiro lugar; o detalhe técnico fica nos "Detalhes técnicos".
+- **Acessibilidade**: descrições acessíveis nos botões de ícone (Esc/F4
+  documentadas) e no toggle de detalhes técnicos.
+- **Visual regression offscreen**: `scripts/ui_visual_states.py` renderiza
+  os 15 estados `UiState` da janela + 4 casos do Agent Control Center
+  (vazio/aprovação/falha/concluído) em PNGs determinísticos, conteúdo 100%
+  sintético. O job `ui-widget-tests` gera os screenshots e publica-os como
+  artefactos da CI. OFFSCREEN ≠ WINDOWS FÍSICO (documentado no script).
 
 ## Testes
 
-- `tests/test_windows_ui_hardening.py` — contratos de fonte, incluindo o
-  guarda de constantes do módulo (regressão do bug `_BORDER_HOVER`) e as
-  asserções `setAutoDefault(False)`/`setDefault(False)`.
-- `tests/test_ui_widget_behaviour.py` — testes Qt reais (offscreen) para
-  construção do diálogo, accessible names, tab order, approve não-default,
-  Enter/Return fail-closed fora do botão de aprovação, clique explícito só em
-  `awaiting_approval`, escape de HTML no histórico, hook de screen change,
-  clamp para ecrã distante, janela maior que a geometria, coordenadas
-  negativas, `screen=None` e janela já visível não movida.
-- `tests/test_approval_keyboard_guard.py` — prova comportamental específica
-  de segurança: com o botão de aprovação habilitado **e focado**, `Return` e
-  `Enter` produzem zero aprovações; `Space` continua a produzir exactamente
-  uma activação explícita.
-- Nas pernas CI sem PyQt6 estes testes saltam de forma limpa; o job
+- `tests/test_windows_ui_hardening.py` — contratos de fonte (fatias 1 e 2),
+  incluindo o guarda de constantes do módulo (regressão `_BORDER_HOVER`) e
+  as asserções `setAutoDefault(False)`/`setDefault(False)`.
+- `tests/test_ui_widget_behaviour.py` — testes Qt reais (offscreen): além
+  de toda a cobertura da fatia 1, mínimo declarado exequível, widgets na
+  viewport ao mínimo, timer do orb segue a visibilidade, histórico limitado
+  a 400 blocos, empty states sem dados inventados, cor da notice por
+  estado e valores `None` sem crash.
+- `tests/test_visual_states_contract.py` — cobertura total dos estados,
+  casos do diálogo, escrita apenas de renders e limitação offscreen
+  documentada.
+- `tests/test_approval_keyboard_guard.py` (fatia 1, do Principal Agent)
+  continua a passar sem alterações.
+- Nas pernas CI sem PyQt6 os testes Qt saltam de forma limpa; o job
   `ui-widget-tests` corre a suíte completa com PyQt6 offscreen em Windows
   3.11/3.12.
 
 ## Limitações
 
-- O clamp é lógico (pontos Qt); DPI físico e scaling por monitor só são
-  provados em ANT-275 (E2E Windows real).
-- Testes Qt offscreen validam comportamento de widgets, não substituem
-  renderização física em Windows.
-- Fatias futuras: redimensionamento (min sizes por conteúdo), visual
-  regression offscreen e performance de repaint do orb.
+- Clamp e sizing usam coordenadas lógicas Qt; DPI físico e scaling por
+  monitor só são provados em ANT-275 (E2E Windows real).
+- CPU do orbe: NOT PHYSICALLY BENCHMARKED — apenas eliminado o trabalho
+  quando a janela está invisível.
+- Fatias futuras: redimensionamento fino por conteúdo, acessibilidade de
+  contraste e mais cobertura de visual regression.

@@ -123,3 +123,13 @@ jobs:
 
       - name: Run full test suite with Qt widgets
         run: python -m unittest discover -s tests -v
+
+      - name: Render visual state screenshots (offscreen)
+        run: python scripts/ui_visual_states.py --out visual_states
+
+      - name: Upload visual state screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-states-${{ matrix.python-version }}
+          path: visual_states/
+          retention-days: 14

@@ -151,12 +151,23 @@ class ParticleOrb(QWidget):
         self._energy = 0.16
         self._target_energy = 0.16
         self._particles = self._make_particles()
-        self.setMinimumSize(360, 360)
+        # 320 keeps the declared window minimum (980x650) achievable:
+        # 44 margins + 36 gutters + 238 + 310 panels + 320 = 948 <= 980.
+        self.setMinimumSize(320, 320)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(33)
+
+    # -.-.-.-
+    def start_animation(self) -> None:
+        if not self._timer.isActive():
+            self._timer.start(33)
+
+    # -.-.-.-
+    def stop_animation(self) -> None:
+        self._timer.stop()
 
     def _make_particles(self) -> list[tuple[float, float, float, float, float]]:
         rng = random.Random(1709)
@@ -300,6 +311,8 @@ class LogView(QTextEdit):
         self.assistant_name = assistant_name
         self.setReadOnly(True)
         self.setFont(_font(9))
+        # Bounded history: old entries drop as new ones arrive.
+        self.document().setMaximumBlockCount(400)
         self.setStyleSheet(
             f"QTextEdit{{background:transparent;color:{Palette.TEXT_MUTED};border:0;padding:0;}}"
             "QScrollBar:vertical{background:transparent;width:6px;}"
@@ -636,6 +649,7 @@ class AntonellaWindow(QMainWindow):
         self._interrupt_button = _icon_button("↓")
         self._interrupt_button.setFixedWidth(50)
         self._interrupt_button.setAccessibleName("Interromper resposta")
+        self._interrupt_button.setAccessibleDescription("Interrompe a resposta em curso · Esc")
         self._interrupt_button.setToolTip("Interromper resposta · Esc")
         self._interrupt_button.clicked.connect(self._do_interrupt)
         row.addWidget(self._interrupt_button)
@@ -643,6 +657,7 @@ class AntonellaWindow(QMainWindow):
         self._mic_button = _icon_button("◉", accent=True)
         self._mic_button.setFixedWidth(64)
         self._mic_button.setAccessibleName("Pausar ou retomar microfone")
+        self._mic_button.setAccessibleDescription("Alterna o microfone · F4")
         self._mic_button.setToolTip("Pausar/retomar microfone · F4")
         self._mic_button.clicked.connect(self._toggle_mute)
         row.addWidget(self._mic_button)
@@ -654,10 +669,17 @@ class AntonellaWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self.orb.start_animation()
         handle = self.windowHandle()
         if handle is not None and not getattr(self, "_screen_hooked", False):
             handle.screenChanged.connect(self._on_screen_changed)
             self._screen_hooked = True
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        # A hidden window never paints; the 30 FPS orb timer must not keep
+        # burning CPU for nothing.
+        self.orb.stop_animation()
 
     def _on_screen_changed(self, screen) -> None:
         """Keep the window in view when it lands on another monitor.
