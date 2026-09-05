@@ -61,6 +61,19 @@ def _rename_path(args: Mapping[str, Any], source: Path | None) -> Path | None:
 
 
 # -.-.-.-
+def _payload_digest(data: bytes) -> str:
+    digest = hashlib.sha256()
+    size = len(data)
+    if size <= _FILE_HASH_LIMIT:
+        digest.update(data)
+    else:
+        digest.update(data[:_FILE_SAMPLE_SIZE])
+        digest.update(data[-_FILE_SAMPLE_SIZE:])
+        digest.update(str(size).encode("ascii", errors="ignore"))
+    return digest.hexdigest()
+
+
+# -.-.-.-
 def _file_digest(path: Path, size: int) -> str:
     digest = hashlib.sha256()
     try:
@@ -70,13 +83,29 @@ def _file_digest(path: Path, size: int) -> str:
                     digest.update(chunk)
             else:
                 digest.update(handle.read(_FILE_SAMPLE_SIZE))
-                if size > _FILE_SAMPLE_SIZE:
-                    handle.seek(max(0, size - _FILE_SAMPLE_SIZE))
-                    digest.update(handle.read(_FILE_SAMPLE_SIZE))
+                handle.seek(max(0, size - _FILE_SAMPLE_SIZE))
+                digest.update(handle.read(_FILE_SAMPLE_SIZE))
                 digest.update(str(size).encode("ascii", errors="ignore"))
         return digest.hexdigest()
     except Exception:
         return ""
+
+
+# -.-.-.-
+def _file_ends_with(path: Path, suffix: bytes) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        if not suffix:
+            return True
+        size = path.stat().st_size
+        if size < len(suffix):
+            return False
+        with path.open("rb") as handle:
+            handle.seek(size - len(suffix))
+            return handle.read(len(suffix)) == suffix
+    except Exception:
+        return False
 
 
 # -.-.-.-
@@ -143,6 +172,12 @@ def _snapshot(path: Path | None) -> dict[str, Any]:
 def _snapshot_from_state(state: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = str((state or {}).get("_path") or "").strip()
     return _snapshot(Path(raw)) if raw else {}
+
+
+# -.-.-.-
+def _path_from_state(state: Mapping[str, Any] | None) -> Path | None:
+    raw = str((state or {}).get("_path") or "").strip()
+    return Path(raw) if raw else None
 
 
 # -.-.-.-
@@ -239,7 +274,7 @@ def verify_file_postcondition(
                 evidence["expected_size"] = len(expected_bytes)
                 actual_size = int(after_source.get("size") or 0)
                 digest = str(after_source.get("sha256") or "")
-                expected_digest = hashlib.sha256(expected_bytes).hexdigest()
+                expected_digest = _payload_digest(expected_bytes)
                 if actual_size != len(expected_bytes):
                     return ExecutionResult.failure(
                         result_action,
@@ -247,7 +282,7 @@ def verify_file_postcondition(
                         delivered=True,
                         evidence=evidence,
                     )
-                if digest and digest != expected_digest:
+                if not digest or digest != expected_digest:
                     return ExecutionResult.failure(
                         result_action,
                         "Created file content digest did not match the request.",
@@ -266,16 +301,19 @@ def verify_file_postcondition(
             )
         content_bytes = str(params.get("content") or "").encode("utf-8")
         actual_size = int(after_source.get("size") or 0)
+        target_path = _path_from_state(after_source)
         if bool(params.get("append", False)):
             before_size = int(before_source.get("size") or 0) if before_source.get("exists") else 0
             expected_size = before_size + len(content_bytes)
             evidence["expected_size"] = expected_size
-            if actual_size == expected_size:
+            tail_matches = bool(target_path and _file_ends_with(target_path, content_bytes))
+            evidence["appended_content_match"] = tail_matches
+            if actual_size == expected_size and tail_matches:
                 return ExecutionResult.verified_success(result_action, evidence=evidence)
         else:
             evidence["expected_size"] = len(content_bytes)
             digest = str(after_source.get("sha256") or "")
-            expected_digest = hashlib.sha256(content_bytes).hexdigest()
+            expected_digest = _payload_digest(content_bytes)
             if actual_size == len(content_bytes) and digest == expected_digest:
                 return ExecutionResult.verified_success(result_action, evidence=evidence)
 
