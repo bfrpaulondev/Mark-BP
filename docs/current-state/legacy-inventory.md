@@ -113,3 +113,23 @@ A `main` analisada não contém:
 ## Critério de atualização
 
 Este inventário é um snapshot, não documentação eterna. Qualquer PR que elimine ou introduza um risco estrutural deve atualizar a secção correspondente ou ligar para um inventário posterior.
+
+## Actualização runtime (2026-09-05 · ANT-272 B1)
+
+O mapa acima descreve o baseline ANT-001. Estado actual do legado após a
+reestruturação (pacote `ui/` viva, `main.py`+`antonella.py` como entrypoints):
+
+| Path | Runtime reachable? | User visible? | Compatibility required? | Safe to remove? |
+|---|---|---|---|---|
+| `ui.py` (3 481 linhas) | **Não** — o pacote `ui/` sombreia o módulo; execução directa é inerte (sem `__main__`) | Não (títulos MARK LI já purgados) | Não encontrado consumidor | **Sim** — candidato a remoção em tarefa própria (tocaria `compileall` na CI) |
+| `main.py` resíduos JARVIS (prints, defaults, comentários) | Sim | Console (stdout) + fallback de prompt | `shutdown_jarvis` é nome interno de tool (nunca falado) | Purgados nesta slice; 0 ocorrências restantes |
+| `main.py` fallback `_load_system_prompt` | Sim (só se `core/prompt.txt` faltar) | Não (instrução interna) | — | Identidade neutra agora |
+| `core/prompt.txt` menções | Sim | Não (proibição explícita + nome interno de tool) | Sim (proibição é intencional) | Não — manter |
+| `class JarvisUI` (`ui/__init__.py`) | Sim (fachada de compatibilidade) | Não (nome interno) | Sim — motores importam-no | Não por agora |
+| `memory/config_manager.py` leituras legadas | Sim | Não | Sim (config existente) | Não por agora |
+
+Prova de inacessibilidade: `tests/test_legacy_inaccessibility.py`
+(`ui.__file__` resolve ao pacote; sem `__main__` no legado; entrypoints só
+usam o pacote). Regressão de identidade: tokens exactos proibidos em
+superfícies vivas, com a máscara do LogView e a proibição do prompt como
+únicas ocorrências legítimas.
