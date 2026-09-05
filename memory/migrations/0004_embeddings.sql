@@ -1,0 +1,13 @@
+-- ANT-276 M3: vector search is INTENTIONALLY NOT DEFINED yet.
+--
+-- The embedding provider/model is a product decision that has not been
+-- made, so no vector column or dimension is committed here. Choosing
+-- vector(1536) (or any dimension) now would silently lock the schema to
+-- a provider. When the embedding model is decided, this migration must:
+--   1. create the extension + column with the chosen dimension;
+--   2. create the ivfflat/hnsw index;
+--   3. backfill via the provider-neutral embeddings adapter.
+-- The textual embedding_model/embedding_version columns in 0001 already
+-- carry provenance for whatever adapter lands.
+--
+-- STATUS: BLOCKED ON EMBEDDING PROVIDER DECISION — NOT APPLIED.

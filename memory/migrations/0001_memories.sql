@@ -2,8 +2,6 @@
 -- NOT EXECUTED HERE: applied to a real Supabase/Postgres by the principal agent.
 -- Versioned, additive-only; never run against production from this repo.
 
-create extension if not exists vector;
-
 create table if not exists memories (
     id uuid primary key default gen_random_uuid(),
     owner_id uuid not null,
@@ -25,7 +23,6 @@ create table if not exists memories (
     conflict_with_id uuid references memories (id),
     embedding_model text,
     embedding_version text,
-    embedding vector(1536),
     created_at timestamptz not null default now(),
     approved_at timestamptz,
     updated_at timestamptz not null default now(),
@@ -60,5 +57,3 @@ create index if not exists memories_expires_idx on memories (expires_at) where e
 create index if not exists memories_supersedes_idx on memories (supersedes_id) where supersedes_id is not null;
 create index if not exists memories_lexical_idx on memories
     using gin (to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(content, '')));
-create index if not exists memories_embedding_idx on memories
-    using ivfflat (embedding vector_cosine_ops) with (lists = 100);

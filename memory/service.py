@@ -124,10 +124,19 @@ class MemoryService:
 
     # -.-.-.-
     def approve(self, record_id: str, *, owner_id: str) -> MemoryRecord:
-        """Approve a proposal; an explicit supersession retires the old one."""
+        """Approve a proposal; an explicit supersession retires the old one.
+
+        M1: an unresolved conflict (``conflict_with_id`` set) can NEVER be
+        approved normally — it must go through ``resolve_conflict`` first.
+        """
         record = self._require(record_id, owner_id)
         if record.state is not MemoryState.PROPOSED:
             raise ValueError(f"only proposed memories can be approved (state={record.state.value})")
+        if record.conflict_with_id is not None:
+            raise ValueError(
+                "unresolved conflict: call resolve_conflict() before approval "
+                f"(conflicts with {record.conflict_with_id})"
+            )
         now = self._now()
         approved = record.with_(state=MemoryState.ACTIVE, approved_at=now, updated_at=now)
         self._repo.save(approved)
@@ -136,6 +145,48 @@ class MemoryService:
             if previous is not None and previous.state is MemoryState.ACTIVE:
                 self._repo.save(previous.with_(state=MemoryState.SUPERSEDED, updated_at=now))
         return approved
+
+    # -.-.-.-
+    def resolve_conflict(
+        self,
+        record_id: str,
+        *,
+        owner_id: str,
+        decision: str,
+    ) -> MemoryRecord:
+        """Explicit conflict resolution (M1): keep_existing | replace_existing | reject_new.
+
+        - keep_existing / reject_new: archive the proposal (the active
+          memory stays untouched; the decision is recorded in metadata);
+        - replace_existing: converts the conflict into an explicit
+          supersession — the proposal stays proposed and ``approve()``
+          then retires the old record.
+        """
+        if decision not in ("keep_existing", "replace_existing", "reject_new"):
+            raise ValueError(f"unknown conflict decision: {decision}")
+        record = self._require(record_id, owner_id)
+        if record.state is not MemoryState.PROPOSED:
+            raise ValueError("only proposed memories can have a conflict resolved")
+        if record.conflict_with_id is None:
+            raise ValueError("record has no conflict to resolve")
+        now = self._now()
+
+        if decision == "replace_existing":
+            resolved = record.with_(
+                supersedes_id=record.conflict_with_id,
+                conflict_with_id=None,
+                updated_at=now,
+            )
+        else:
+            resolved = record.with_(
+                state=MemoryState.ARCHIVED,
+                archived_at=now,
+                updated_at=now,
+                conflict_with_id=None,
+                metadata={**record.metadata, "conflict_resolution": decision},
+            )
+        self._repo.save(resolved)
+        return resolved
 
     # -.-.-.-
     def retrieve(
