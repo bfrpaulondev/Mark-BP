@@ -420,6 +420,53 @@ class RealtimeComputerUseSession:
                             self._finish("stopped", result="Computer Use stopped by user.")
                             return
 
+                        try:
+                            approved_frame = capture.latest(timeout=0.08)
+                        except Exception:
+                            approved_frame = frame
+
+                        if self._state.target_window and not target_scope_is_valid(
+                            approved_frame, self._state.target_window
+                        ):
+                            frame = approved_frame
+                            self._set_frame_state(frame, state="recovering")
+                            history.append(
+                                "Target window changed while approval was pending; approved action was discarded."
+                            )
+                            history = history[-12:]
+                            self._log(
+                                "Computer Use · target changed after approval; action discarded"
+                            )
+                            replan_requested = True
+                            break
+
+                        if action_plan_is_stale(action, frame, approved_frame):
+                            if not recovery.can_recover(recovery_policy):
+                                self._finish(
+                                    "failed",
+                                    error="Computer Use exhausted its post-approval stale-plan recovery budget.",
+                                )
+                                return
+                            recovery.note_recovery(
+                                "desktop changed while approval was pending; approved action discarded",
+                                kind="stale",
+                            )
+                            self._apply_recovery_state(recovery)
+                            frame = approved_frame
+                            self._set_frame_state(frame, state="recovering")
+                            history.append(
+                                "Desktop changed while approval was pending; approved action was discarded and must be planned again."
+                            )
+                            history = history[-12:]
+                            self._log(
+                                "Computer Use · approved visual plan became stale; action discarded"
+                            )
+                            replan_requested = True
+                            break
+
+                    if replan_requested:
+                        break
+
                     with self._lock:
                         self._state.state = "executing"
                         self._state.awaiting_approval = False
