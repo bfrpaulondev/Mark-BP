@@ -47,7 +47,7 @@ quando não pode → informa claramente sem inventar sucesso
 
 - [x] **ANT-268 — Estados operacionais explícitos na UI.** PR #37 integrada após principal review; estados desconhecidos permanecem conservadores em vez de aparecerem como PRONTA.
 - [x] **ANT-269 — Evoluir Agent Control Center.** PR #42 integrada após principal review/correcções: progresso/timeline/evidência/janela alvo, custo ANT-264 e Stop/Approve contextuais sem inventar percentagens/custo.
-- [ ] **ANT-270 — Hardening UI Windows.** PR #44 voltou a Draft após principal review: precisa ser reconciliada com `main`, corrigir erro de runtime no painel e provar por teste Qt comportamental que Enter/Return não concede aprovação. DPI/responsividade, accessibility, visual regression e performance continuam nesta linha.
+- [ ] **ANT-270 — Hardening UI Windows.** PR #44 integrou a primeira fatia após principal review: focus/accessibility, clamp multi-monitor, CI Qt Windows e aprovação fail-closed onde Enter/Return nunca concede autorização, mantendo Space/click explícitos. Continuam pendentes sizing/responsividade mais profunda, visual regression, empty/error polish, microtransições, performance de repaint e validação física DPI/multi-monitor no ANT-275.
 - [ ] **ANT-271 — Sincronizar voz com verificação.** Nunca falar sucesso antes do verifier; melhorar barge-in, cancelamento, silêncio/end-of-turn e progresso falado conciso.
 - [ ] **ANT-272 — Limpar identidade herdada.** Remover gradualmente resíduos JARVIS/Mark visíveis ou internos onde não sejam necessários para compatibilidade.
 
