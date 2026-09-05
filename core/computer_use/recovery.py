@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 
 from core.computer_use.contracts import ComputerAction, FrameSnapshot
+from core.structured_logging import get_logger, log_recovery_event
 
 
 _COORDINATE_ACTIONS = {"click", "double_click", "right_click", "move"}
@@ -50,6 +52,10 @@ class RecoveryState:
     stale_replans: int = 0
     target_reacquisitions: int = 0
     last_reason: str = ""
+    task_id: str = field(
+        default_factory=lambda: f"cu-{uuid.uuid4().hex[:16]}",
+        repr=False,
+    )
     _action_retry_counts: dict[str, int] = field(default_factory=dict, repr=False)
 
     # -.-.-.-
@@ -68,6 +74,7 @@ class RecoveryState:
             self.stale_replans += 1
         elif kind == "reacquire":
             self.target_reacquisitions += 1
+        self._emit_recovery(_reason_code(self.last_reason, kind=kind))
 
     # -.-.-.-
     def can_recover(self, policy: RecoveryPolicy) -> bool:
@@ -86,6 +93,7 @@ class RecoveryState:
         self._action_retry_counts[action.action] = (
             self._action_retry_counts.get(action.action, 0) + 1
         )
+        self._emit_recovery("safe_action_retry", retry=True)
 
     # -.-.-.-
     def snapshot(self) -> dict[str, int | str]:
@@ -97,6 +105,37 @@ class RecoveryState:
             "target_reacquisitions": self.target_reacquisitions,
             "last_reason": self.last_reason,
         }
+
+    # -.-.-.-
+    def _emit_recovery(self, reason_code: str, *, retry: bool = False) -> None:
+        try:
+            log_recovery_event(
+                get_logger("computer_use"),
+                task_id=self.task_id,
+                reason_code=reason_code,
+                recovery_count=self.recoveries,
+                retry_count=self.safe_action_retries,
+                stale_replans=self.stale_replans,
+                target_reacquisitions=self.target_reacquisitions,
+                retry=retry,
+            )
+        except Exception:
+            # Observability must never alter recovery semantics.
+            pass
+
+
+# -.-.-.-
+def _reason_code(reason: str, *, kind: str) -> str:
+    if kind == "stale":
+        return "stale_plan"
+    if kind == "reacquire":
+        return "target_reacquire"
+    lowered = str(reason or "").casefold()
+    if "scroll" in lowered:
+        return "scroll_no_effect"
+    if "visual" in lowered or "screen change" in lowered:
+        return "visual_no_effect"
+    return "bounded_recovery"
 
 
 # -.-.-.-
