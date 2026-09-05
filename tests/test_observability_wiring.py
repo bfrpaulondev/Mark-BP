@@ -33,17 +33,21 @@ class StructuredObservabilityPrivacyTests(unittest.TestCase):
             "image_bytes": b"123456",
             "api_key": "sk-super-secret-value-1234567890",
             "metadata": [str(index) for index in range(40)],
+            "metric_nan": float("nan"),
+            "metric_inf": float("inf"),
         }
         payload["cycle"] = payload
 
         safe = redact(payload)
-        serialized = json.dumps(safe, ensure_ascii=False)
+        serialized = json.dumps(safe, ensure_ascii=False, allow_nan=False)
 
         self.assertNotIn("private prompt", serialized)
         self.assertNotIn("super-secret", serialized)
         self.assertIn("[CYCLE]", serialized)
         self.assertIn("[TRUNCATED]", serialized)
         self.assertEqual(safe["image_bytes"]["length"], 6)
+        self.assertIsNone(safe["metric_nan"])
+        self.assertIsNone(safe["metric_inf"])
 
     def test_recovery_logging_uses_reason_codes_not_runtime_reason_text(self) -> None:
         stream = io.StringIO()
