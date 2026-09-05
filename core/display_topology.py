@@ -143,13 +143,14 @@ def _monitor_dpi(hmonitor: int) -> tuple[int, int]:
     if platform.system() != "Windows" or not hmonitor:
         return _DEFAULT_DPI, _DEFAULT_DPI
     try:
+        hmonitor_type = getattr(wintypes, "HMONITOR", wintypes.HANDLE)
         shcore = ctypes.windll.shcore
         getter = shcore.GetDpiForMonitor
-        getter.argtypes = [wintypes.HMONITOR, ctypes.c_int, ctypes.POINTER(wintypes.UINT), ctypes.POINTER(wintypes.UINT)]
+        getter.argtypes = [hmonitor_type, ctypes.c_int, ctypes.POINTER(wintypes.UINT), ctypes.POINTER(wintypes.UINT)]
         getter.restype = ctypes.c_long
         dpi_x = wintypes.UINT(_DEFAULT_DPI)
         dpi_y = wintypes.UINT(_DEFAULT_DPI)
-        if getter(wintypes.HMONITOR(int(hmonitor)), 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)) == 0:
+        if getter(hmonitor_type(int(hmonitor)), 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)) == 0:
             return max(1, int(dpi_x.value)), max(1, int(dpi_y.value))
     except Exception:
         pass
@@ -173,10 +174,12 @@ def windows_monitor_metadata() -> list[dict[str, Any]]:
 
     try:
         user32 = ctypes.windll.user32
+        hmonitor_type = getattr(wintypes, "HMONITOR", wintypes.HANDLE)
+        hdc_type = getattr(wintypes, "HDC", wintypes.HANDLE)
         callback_type = ctypes.WINFUNCTYPE(
             wintypes.BOOL,
-            wintypes.HMONITOR,
-            wintypes.HDC,
+            hmonitor_type,
+            hdc_type,
             ctypes.POINTER(wintypes.RECT),
             wintypes.LPARAM,
         )
@@ -243,24 +246,39 @@ def match_monitor_metadata(
 
 
 # -.-.-.-
-def monitor_metadata_by_index(monitors: Sequence[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
-    return match_monitor_metadata(monitors, windows_monitor_metadata())
+def _metadata_signature(metadata: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    entries = [
+        {
+            "left": _rect_tuple(item)[0],
+            "top": _rect_tuple(item)[1],
+            "width": _rect_tuple(item)[2],
+            "height": _rect_tuple(item)[3],
+            "device": str(item.get("device") or ""),
+            "primary": bool(item.get("primary", False)),
+            "dpi_x": int(item.get("dpi_x") or _DEFAULT_DPI),
+            "dpi_y": int(item.get("dpi_y") or _DEFAULT_DPI),
+        }
+        for item in metadata
+    ]
+    return sorted(entries, key=lambda item: (item["device"], item["left"], item["top"], item["width"], item["height"]))
 
 
 # -.-.-.-
 def topology_token(
     monitors: Sequence[Mapping[str, Any]],
     metadata_by_index: Mapping[int, Mapping[str, Any]] | None = None,
+    *,
+    system_metadata: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     """Stable token that changes when geometry, primary display or effective DPI changes."""
     metadata_by_index = metadata_by_index or {}
-    entries: list[dict[str, Any]] = []
+    mss_entries: list[dict[str, Any]] = []
     for index, monitor in enumerate(monitors):
         if index == 0:
             continue
         left, top, width, height = _rect_tuple(monitor)
         meta = metadata_by_index.get(index, {})
-        entries.append(
+        mss_entries.append(
             {
                 "left": left,
                 "top": top,
@@ -272,8 +290,27 @@ def topology_token(
                 "dpi_y": int(meta.get("dpi_y") or _DEFAULT_DPI),
             }
         )
-    payload = json.dumps(entries, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
+    payload = {
+        "mss": mss_entries,
+        "system": _metadata_signature(system_metadata or []),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+
+
+# -.-.-.-
+def display_topology_state(
+    monitors: Sequence[Mapping[str, Any]],
+) -> tuple[dict[int, dict[str, Any]], str]:
+    raw_metadata = windows_monitor_metadata()
+    matched = match_monitor_metadata(monitors, raw_metadata)
+    return matched, topology_token(monitors, matched, system_metadata=raw_metadata)
+
+
+# -.-.-.-
+def monitor_metadata_by_index(monitors: Sequence[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
+    metadata, _token = display_topology_state(monitors)
+    return metadata
 
 
 # -.-.-.-
@@ -284,8 +321,8 @@ def current_topology_token() -> str:
         with per_monitor_dpi_context():
             with mss.mss() as sct:
                 monitors = list(sct.monitors)
-        metadata = monitor_metadata_by_index(monitors)
-        return topology_token(monitors, metadata)
+        _metadata, token = display_topology_state(monitors)
+        return token
     except Exception:
         return ""
 
