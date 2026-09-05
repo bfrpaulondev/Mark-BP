@@ -54,6 +54,17 @@ class LocalPerceptionSafetyContextTests(unittest.TestCase):
                 self.assertFalse(decision.allowed)
                 self.assertTrue(decision.requires_approval)
 
+    def test_short_local_terms_do_not_change_unrelated_vlm_description_semantics(self):
+        decision = evaluate_action(
+            ComputerAction(
+                action="click",
+                description="Open the runtime diagnostics tab to read status",
+                risk="low",
+            )
+        )
+        self.assertTrue(decision.allowed)
+        self.assertFalse(decision.requires_approval)
+
 
 if __name__ == "__main__":
     unittest.main()
