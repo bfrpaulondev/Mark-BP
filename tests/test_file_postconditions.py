@@ -5,7 +5,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from actions.file_controller import file_controller
-from core.file_postconditions import capture_file_state, verify_file_postcondition
+from core.file_postconditions import (
+    _file_digest,
+    _payload_digest,
+    capture_file_state,
+    verify_file_postcondition,
+)
 from core.postcondition_verifiers import verify_postcondition
 
 
@@ -37,6 +42,34 @@ class FilePostconditionTests(unittest.TestCase):
 
         self.assertTrue(execution.can_claim_success)
         self.assertEqual(execution.evidence["after_source"]["size"], 5)
+
+    def test_append_verifies_size_and_exact_tail_without_exposing_content(self):
+        secret = "-private-tail"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "append.txt"
+            target.write_text("before", encoding="utf-8")
+            args = {"action": "write", "path": str(target), "content": secret, "append": True}
+            before = capture_file_state(args)
+            with patch("actions.file_controller._SAFE_ROOTS", [root]):
+                raw = file_controller(args)
+            execution = verify_postcondition("file_controller", args, raw, before_state=before)
+
+        self.assertTrue(execution.can_claim_success)
+        self.assertTrue(execution.evidence["appended_content_match"])
+        self.assertNotIn(secret, json.dumps(execution.to_dict(), ensure_ascii=False))
+
+    def test_sampled_digest_matches_large_file_algorithm(self):
+        payload = b"0123456789abcdef"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "large.bin"
+            target.write_bytes(payload)
+            with patch("core.file_postconditions._FILE_HASH_LIMIT", 8), \
+                 patch("core.file_postconditions._FILE_SAMPLE_SIZE", 4):
+                expected = _payload_digest(payload)
+                observed = _file_digest(target, len(payload))
+
+        self.assertEqual(observed, expected)
 
     def test_move_to_preexisting_directory_uses_pre_action_destination(self):
         with tempfile.TemporaryDirectory() as temp_dir:
