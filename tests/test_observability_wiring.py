@@ -109,6 +109,7 @@ class StructuredObservabilityPrivacyTests(unittest.TestCase):
         self.assertEqual(attempt["latency_ms"], 42)
         self.assertEqual(attempt["input_tokens"], 100)
         self.assertEqual(attempt["output_tokens"], 25)
+        self.assertNotIn("retryable", attempt)
         self.assertIsNotNone(attempt["cost_usd"])
         self.assertTrue(summary["cost_complete"])
         self.assertTrue(summary["ok"])
