@@ -24,7 +24,15 @@ class RealtimeComputerUsePluginTests(unittest.TestCase):
         description = PLUGIN["description"].lower()
         self.assertIn("only", description)
         self.assertIn("cheaper structured tools", description)
-        self.assertIn("remote desktops", description)
+        self.assertIn("rejects stale visual plans", description)
+        self.assertNotIn("screenconnect", description)
+
+    def test_plugin_exposes_pause_and_resume(self):
+        from plugins.realtime_computer_use import PLUGIN
+
+        action_description = PLUGIN["parameters"]["properties"]["action"]["description"]
+        self.assertIn("pause", action_description)
+        self.assertIn("resume", action_description)
 
 
 if __name__ == "__main__":
