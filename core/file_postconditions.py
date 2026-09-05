@@ -25,13 +25,27 @@ FILE_VERIFIABLE_ACTIONS = {
 
 
 # -.-.-.-
-def _target_path(args: Mapping[str, Any]) -> Path | None:
+def _safe_resolved_path(raw: str) -> Path | None:
     try:
-        from actions.file_controller import _resolve_path
+        from actions.file_controller import _is_safe_path, _resolve_path
 
-        base = _resolve_path(str(args.get("path") or "desktop"))
-        name = str(args.get("name") or "").strip()
-        return (base / name) if name else base
+        target = _resolve_path(raw)
+        return target if _is_safe_path(target) else None
+    except Exception:
+        return None
+
+
+# -.-.-.-
+def _target_path(args: Mapping[str, Any]) -> Path | None:
+    base = _safe_resolved_path(str(args.get("path") or "desktop"))
+    if base is None:
+        return None
+    name = str(args.get("name") or "").strip()
+    target = (base / name) if name else base
+    try:
+        from actions.file_controller import _is_safe_path
+
+        return target if _is_safe_path(target) else None
     except Exception:
         return None
 
@@ -41,13 +55,15 @@ def _destination_path(args: Mapping[str, Any], source: Path | None) -> Path | No
     destination = str(args.get("destination") or "").strip()
     if not destination:
         return None
+    target = _safe_resolved_path(destination)
+    if target is None:
+        return None
+    if target.is_dir() and source is not None:
+        target = target / source.name
     try:
-        from actions.file_controller import _resolve_path
+        from actions.file_controller import _is_safe_path
 
-        target = _resolve_path(destination)
-        if target.is_dir() and source is not None:
-            return target / source.name
-        return target
+        return target if _is_safe_path(target) else None
     except Exception:
         return None
 
@@ -57,7 +73,13 @@ def _rename_path(args: Mapping[str, Any], source: Path | None) -> Path | None:
     new_name = str(args.get("new_name") or "").strip()
     if source is None or not new_name:
         return None
-    return source.parent / new_name
+    target = source.parent / new_name
+    try:
+        from actions.file_controller import _is_safe_path
+
+        return target if _is_safe_path(target) else None
+    except Exception:
+        return None
 
 
 # -.-.-.-
@@ -185,7 +207,7 @@ def _public(state: Mapping[str, Any] | None) -> dict[str, Any]:
     return {
         str(key): value
         for key, value in dict(state or {}).items()
-        if not str(key).startswith("_")
+        if not str(key).startswith("_") and str(key) != "name"
     }
 
 
@@ -229,9 +251,10 @@ def capture_file_state(args: Mapping[str, Any] | None) -> dict[str, Any]:
     }
     if action == "organize_desktop":
         try:
-            from actions.file_controller import _get_desktop
+            from actions.file_controller import _get_desktop, _is_safe_path
 
-            state["source"] = _snapshot(_get_desktop())
+            desktop = _get_desktop()
+            state["source"] = _snapshot(desktop) if _is_safe_path(desktop) else {}
         except Exception:
             pass
     return state
