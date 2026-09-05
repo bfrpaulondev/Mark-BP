@@ -316,7 +316,6 @@ class CostTelemetry:
                 latency_ms=event.latency_ms,
                 ok=event.ok,
                 retry=event.retry,
-                retryable=False,
                 fallback=event.fallback,
                 cost_usd=event.estimated_cost_usd,
                 usage=safe_usage.safe_metadata(),
