@@ -8,7 +8,7 @@ PLUGIN = {
     "description": (
         "Zero-token live display inventory for multi-monitor Windows setups. Use it when the user asks "
         "which monitors are available, refers to monitor/screen 1/2/3, changes display layout/scaling, "
-        "or when you need to resolve the active display before a visual task. It returns physical virtual-"
+        "or when you need to resolve the active display before a visual task. It returns physical virtual "
         "desktop coordinates, sizes, active/primary state, effective DPI/scale and a topology token that "
         "changes when monitor geometry, primary display, DPI or connection state changes. Explicit missing "
         "monitor numbers fail closed instead of silently falling back to another display."
