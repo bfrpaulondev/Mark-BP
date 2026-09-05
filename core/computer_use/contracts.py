@@ -65,6 +65,10 @@ class ComputerAction:
     risk: str = "low"
     result: str = ""
     reobserve: bool = True
+    # Local deterministic adapters may attach transient semantic context for
+    # safety classification. It is intentionally not accepted from model
+    # payloads and is never included in history_line()/SessionState evidence.
+    safety_context: str = ""
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ComputerAction":
