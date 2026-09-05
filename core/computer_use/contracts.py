@@ -119,6 +119,14 @@ class SessionState:
     last_error: str = ""
     result: str = ""
     awaiting_approval: bool = False
+    paused: bool = False
+    target_locked: bool = False
+    recovery_count: int = 0
+    retry_count: int = 0
+    no_change_streak: int = 0
+    stale_replans: int = 0
+    target_reacquisitions: int = 0
+    last_recovery_reason: str = ""
     monitor_index: int | None = None
     history: list[str] = field(default_factory=list)
     telemetry_task_id: str = ""
@@ -153,6 +161,14 @@ class SessionState:
             "last_error": self.last_error,
             "result": self.result,
             "awaiting_approval": self.awaiting_approval,
+            "paused": self.paused,
+            "target_locked": self.target_locked,
+            "recovery_count": self.recovery_count,
+            "retry_count": self.retry_count,
+            "no_change_streak": self.no_change_streak,
+            "stale_replans": self.stale_replans,
+            "target_reacquisitions": self.target_reacquisitions,
+            "last_recovery_reason": self.last_recovery_reason,
             "monitor_index": self.monitor_index,
             "history": list(self.history[-12:]),
             "telemetry_task_id": self.telemetry_task_id,

@@ -135,7 +135,7 @@ class PolicyEngine:
 
     The engine intentionally reasons only from the selected tool and bounded action metadata.
     It never trusts model-supplied `confirmed`, `approved`, `risk` or similar flags as human
-    authorization. ANT-262 will add action-bound one-use human approval tokens.
+    authorization. ANT-262 adds action-bound one-use human approval tokens to the core path.
     """
 
     # -.-.-.-
@@ -155,6 +155,18 @@ class PolicyEngine:
                 requires_approval=False,
                 rule_id="blocked.security_bypass",
                 reason="This operation is blocked by Antonella's local security policy.",
+            )
+
+        if name == "realtime_computer_use" and action == "approve":
+            return PolicyDecision(
+                effect=PolicyEffect.BLOCKED,
+                allowed=False,
+                requires_approval=False,
+                rule_id="blocked.model_driven_approval",
+                reason=(
+                    "Computer Use approval must originate from the trusted local human "
+                    "approval surface, never from a model-callable tool."
+                ),
             )
 
         if name in _FINANCIAL_TOOLS or action in {

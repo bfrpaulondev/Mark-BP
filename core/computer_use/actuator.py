@@ -18,6 +18,8 @@ _VISUAL_ACTIONS = {
     "move",
 }
 
+_CHANGE_EXPECTED_ACTIONS = _VISUAL_ACTIONS - {"move"}
+
 
 # -.-.-.-
 def _frame_topology_is_current(frame: FrameSnapshot) -> bool:
@@ -85,4 +87,4 @@ def execute_action(
 
     with per_monitor_dpi_context():
         result = computer_control(parameters=params, player=player)
-    return str(result or "Done."), action.action in _VISUAL_ACTIONS
+    return str(result or "Done."), action.action in _CHANGE_EXPECTED_ACTIONS

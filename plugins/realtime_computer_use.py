@@ -11,18 +11,19 @@ PLUGIN = {
         "Use ONLY for multi-step visual desktop tasks that cannot be completed with "
         "cheaper structured tools such as open_app, browser_control, windows_ui_automation, "
         "computer_settings, computer_control, file_controller or file_processor. It keeps a "
-        "local live desktop capture, detects meaningful frame changes, and calls vision only "
-        "when needed. Good for remote desktops such as ScreenConnect or unknown desktop UIs. "
-        "Use display_manager first when the user explicitly identifies monitor/screen 1/2/3. "
-        "Actions: start, status, stop, approve. Never use this for a single click, scroll, "
-        "typing command, browser DOM task, file operation, or app launch."
+        "local live desktop capture, detects meaningful frame changes, rejects stale visual "
+        "plans, and calls vision only when needed. Use display_manager first when the user "
+        "explicitly identifies monitor/screen 1/2/3. Actions: start, status, pause, resume, "
+        "stop. Approval is intentionally unavailable through this model-callable tool and "
+        "must come from the trusted local approval surface. Never use this for a single "
+        "click, scroll, typing command, browser DOM task, file operation, or app launch."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "start | status | stop | approve",
+                "description": "start | status | pause | resume | stop",
             },
             "objective": {
                 "type": "STRING",
@@ -31,7 +32,7 @@ PLUGIN = {
             "target_window": {
                 "type": "STRING",
                 "description": (
-                    "Optional local window title fragment to focus first, e.g. ScreenConnect."
+                    "Optional local window title fragment to keep as the explicit visual target."
                 ),
             },
             "monitor": {
@@ -71,14 +72,24 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
             )
         elif action == "status":
             result = {"ok": True, "status": session.status()}
+        elif action == "pause":
+            result = session.pause()
+        elif action == "resume":
+            result = session.resume()
         elif action == "stop":
             result = session.stop()
         elif action == "approve":
-            result = session.approve_once()
+            result = {
+                "ok": False,
+                "error": (
+                    "Computer Use approval cannot be granted through the model-callable tool. "
+                    "Use the trusted local approval surface."
+                ),
+            }
         else:
             result = {
                 "ok": False,
-                "error": "Use action=start, status, stop or approve.",
+                "error": "Use action=start, status, pause, resume or stop.",
             }
     except Exception as exc:
         result = {"ok": False, "error": str(exc)}
