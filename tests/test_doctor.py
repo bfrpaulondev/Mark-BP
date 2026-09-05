@@ -8,7 +8,50 @@ from unittest.mock import patch
 from scripts import doctor
 
 
+class RuntimeProbeTests(unittest.TestCase):
+    # -.-.-.-
+    def test_probe_rejects_failed_native_import(self):
+        with patch.object(doctor.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)):
+            self.assertFalse(doctor._probe_runtime("import sounddevice"))
+
+    # -.-.-.-
+    def test_probe_bounds_time_and_discards_output(self):
+        with patch.object(doctor.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 15)) as run:
+            self.assertFalse(doctor._probe_runtime("import sounddevice"))
+        self.assertEqual(run.call_args.kwargs["timeout"], 15)
+        self.assertEqual(run.call_args.kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(run.call_args.kwargs["stderr"], subprocess.DEVNULL)
+
+
 class DoctorTests(unittest.TestCase):
+    # -.-.-.-
+    def setUp(self):
+        self.probe = patch.object(doctor, "_probe_runtime", return_value=True).start()
+        self.addCleanup(patch.stopall)
+
+    # -.-.-.-
+    def test_invalid_configuration_returns_report_without_secret(self):
+        output = io.StringIO()
+        with patch.object(doctor, "get_config", side_effect=ValueError("private-value")):
+            self.assertEqual(doctor.run_doctor(output), 1)
+        self.assertIn("Configuration could not be loaded", output.getvalue())
+        self.assertNotIn("private-value", output.getvalue())
+
+    # -.-.-.-
+    def test_live_does_not_require_legacy_voice_extras(self):
+        with patch.object(doctor, "missing_for_config", return_value=[]) as missing:
+            doctor.run_doctor(io.StringIO())
+        self.assertEqual(missing.call_args.args[0]["stt_engine"], "live")
+        self.assertEqual(missing.call_args.args[0]["tts_engine"], "live")
+
+    # -.-.-.-
+    def test_native_failure_blocks_readiness(self):
+        self.probe.return_value = False
+        output = io.StringIO()
+        self.assertEqual(doctor.run_doctor(output), 1)
+        self.assertIn("Native audio/GUI/desktop imports failed", output.getvalue())
+        self.assertIn("Default microphone and speaker failed", output.getvalue())
+
     # -.-.-.-
     def test_ready_environment_returns_zero(self):
         output = io.StringIO()
