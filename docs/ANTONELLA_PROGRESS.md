@@ -4,18 +4,18 @@
 
 **Última atualização:** 2026-09-05
 **Branch canónica:** `main`
-**Main confirmado:** `56a91411d7b30a69096305e1c7267875911b33fb`
+**Main confirmado:** `6ca8e8e4cf37bca6bc4f5a8ce4c2aa0f708fe43a`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | ANT-256 — browser verificável |
-| Branch de implementação | `codex/ant-256-playwright-verification` |
-| Pull request | PR #30 — verified managed Playwright effects |
+| Tarefa ativa | ANT-256 — browser verificável, terceira slice SPA/popups/downloads |
+| Branch de implementação | `codex/ant-256-browser-events-spa` |
+| Pull request | PR #31 — verified browser SPA/popups/downloads |
 | Issues abertas | Nenhuma necessária para este trabalho |
-| Próximo teste real | Windows: browser real multi-window/tabs + browser gerido go_to/type/scroll/click/form/tab lifecycle |
-| Próximo bloco | fechar PR #30; depois CDP opcional/popups/downloads/SPA ou ANT-257 conforme dependências |
+| Próximo teste real | Windows: SPA sem mudança de URL, popup real e download Playwright com/sem persistência |
+| Próximo bloco | CDP opcional read-only/attach apenas quando o browser já tiver remote debugging explícito; depois ANT-257 |
 
 ## Prioridade aprovada em 2026-09-05
 
@@ -40,7 +40,8 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - PR #26: primeira slice `open_app`/focus; merge `6bd204892b3e72fb3ea8ed6f68f6497155f807e5`; CI verde.
 - PR #27: hardening `open_app`; merge `8558ce21a7e07e466198a706ed0cf90cef1c8bed`; pre-state/delta real e launcher Windows sem `shell=True`; CI verde.
 - PR #28: desktop input/window postconditions; merge `680c537e6d31244aceca444648315d82e1d596cf`; ANT-254/255 cobertos por verificadores locais; CI verde.
-- PR #29: real browser windows/tabs; merge `56a91411d7b30a69096305e1c7267875911b33fb`; múltiplas janelas reais, tabs por índice/título/URL e ambiguity fail-closed; CI final verde após corrigir regressões de contrato.
+- PR #29: real browser windows/tabs; merge `56a91411d7b30a69096305e1c7267875911b33fb`; múltiplas janelas reais, tabs por índice/título/URL e ambiguity fail-closed; CI verde.
+- PR #30: managed Playwright verification; merge `6ca8e8e4cf37bca6bc4f5a8ce4c2aa0f708fe43a`; go_to/search/type/scroll/click/forms/tab lifecycle/history/reload com postconditions estruturais; CI verde.
 
 ## ANT-251–255 — integrados
 
@@ -49,7 +50,7 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - apps/janelas e input físico usam estado Windows/UIA/frame-diff local quando disponível;
 - texto digitado e amostras efémeras não são serializados na evidence.
 
-## ANT-256 — duas superfícies explicitamente separadas
+## ANT-256 — browser real e automação gerida separados
 
 ### Browser real já aberto — integrado na PR #29
 
@@ -63,25 +64,37 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - clipboard usado para ler URL é restaurado;
 - o prompt proíbe criar Playwright apenas para manipular tabs/janelas que já existem.
 
-### Browser Playwright explicitamente gerido — PR #30
+### Browser Playwright explicitamente gerido — integrado na PR #30
 
-Novo `verified_browser_automation` evita que o legado `browser_control` seja a superfície preferida para efeitos DOM:
-
+- `verified_browser_automation` é a superfície preferida para efeitos DOM geridos;
 - `go_to/search`: confirma URL final contra destino;
-- `type/smart_type`: relê `input_value()` e compara; texto real não entra na evidence;
+- `type/smart_type`: relê `input_value()` e compara sem expor texto na evidence;
 - `scroll`: compara `window.scrollY` antes/depois;
-- `click/smart_click`: compara URL/title/foco/page-count e estados do elemento (`checked`, `aria-expanded`, `aria-pressed`, selected/value length); click sem efeito observável fica não verificado;
-- `fill_form`: cada selector é relido e validado, sem guardar valores na evidence;
+- `click/smart_click`: confirma estados estruturais conhecidos;
+- `fill_form`: relê cada selector e valida sem guardar valores;
 - `new_tab/close_tab`: page-count + page state;
 - `back/forward`: mudança de URL;
 - `reload`: conclusão Playwright + página activa;
 - `session_status`: read-only e não cria sessão;
-- plugin entra sempre no central execution verification contract;
-- `browser_control` permanece apenas por compatibilidade, enquanto o prompt prefere a camada verificada.
+- plugin entra no central execution verification contract;
+- `browser_control` permanece apenas por compatibilidade.
 
-Testes novos cobrem helpers, policy, contrato do plugin/prompt e efeitos async com fake page para scroll/type. A primeira CI da PR #30 ficou verde em Python 3.11, Python 3.12 e dependency lock. O commit final de docs deve voltar a passar antes do merge.
+### SPA, popups e downloads — PR #31
 
-ANT-256 ainda não deve ser marcada concluída: CDP opcional para browsers já iniciados explicitamente com remote debugging, popups/downloads e alguns efeitos SPA continuam pendentes. Não relançar silenciosamente o perfil real do utilizador com flags de debugging.
+Novo `actions/verified_browser_events.py` fecha os principais falsos negativos/falsos positivos que restavam em eventos de browser gerido:
+
+- `click/smart_click` medem ruído DOM local antes da acção com `MutationObserver` e só aceitam mutação pós-clique acima desse baseline, ou outro estado estrutural já verificável;
+- não envia screenshot nem conteúdo DOM para modelo;
+- `click_popup` usa `expect_popup`, correlaciona o novo page event com o clique e confirma aumento do page-count/página aberta;
+- popup verificado pode tornar-se a página activa do workflow;
+- `click_download` usa `expect_download`, espera o estado final e permanece fail-closed se a conclusão não puder ser consultada;
+- `save_download` é opt-in e só grava em `~/Downloads` com filename sanitizado e sem overwrite silencioso;
+- evidence de download não inclui caminho completo nem filename, apenas metadados mínimos como extensão/tamanho quando guardado;
+- `delivered=true` só é emitido quando o clique foi efectivamente enviado.
+
+A primeira CI da PR #31 encontrou apenas uma regressão de sanitização (`control-only filename` produzia underscores). O código foi corrigido para cair em `download`; adicionalmente o fluxo popup/download foi endurecido para não assumir entrega/conclusão. A CI seguinte passou em lock e Python 3.11/3.12 antes do commit final de documentação; o head final deve voltar a ficar verde antes do merge.
+
+ANT-256 ainda não deve ser marcada concluída: falta CDP opcional para browsers Chromium que já tenham sido iniciados explicitamente com remote debugging e E2E Windows/Playwright real. A Antonella não deve relançar silenciosamente o perfil real do utilizador com flags de debugging.
 
 ## Realtime Computer Use económico — integrado, E2E físico pendente
 
@@ -101,8 +114,8 @@ ANT-256 ainda não deve ser marcada concluída: CDP opcional para browsers já i
 
 ## Próxima sequência
 
-1. integrar PR #30 apenas se a CI final continuar verde;
-2. concluir ANT-256 com CDP opcional/popups/downloads/SPA quando seguro;
+1. integrar PR #31 apenas se a CI final continuar verde;
+2. concluir ANT-256 com CDP opcional seguro, sem relançar browser real;
 3. ANT-257 — multi-monitor/DPI hardening;
 4. ANT-258 — UIA/files/settings;
 5. ANT-259–263 — Orchestrator/Policy/Provider Router;
