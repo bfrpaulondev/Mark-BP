@@ -161,7 +161,7 @@ class RealtimeComputerUseSession:
             from core.computer_use.recovery import (
                 RecoveryPolicy,
                 RecoveryState,
-                frame_is_superseded,
+                action_plan_is_stale,
                 target_scope_is_valid,
             )
             from core.computer_use.safety import evaluate_action
@@ -341,7 +341,7 @@ class RealtimeComputerUseSession:
                     except Exception:
                         live_frame = frame
 
-                    if frame_is_superseded(frame, live_frame):
+                    if action_plan_is_stale(action, frame, live_frame):
                         if not recovery.can_recover(recovery_policy):
                             self._finish(
                                 "failed",
