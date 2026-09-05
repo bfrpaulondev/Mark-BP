@@ -14,7 +14,7 @@
 | Branch de implementação | `codex/ant-258-uia-files-settings-verification` |
 | Pull request | PR #34 — verify UIA, filesystem and Windows settings effects |
 | Issues abertas | Nenhuma necessária para este trabalho |
-| CI de código | #103 verde em Dependency lock + Python 3.11 + Python 3.12 antes do commit final de documentação |
+| CI de código | #105 verde em Dependency lock + Python 3.11 + Python 3.12 no head inicial; nova execução pendente após hardening UIA |
 | Próximo teste real | ANT-275 Windows físico: UIA, settings, filesystem, multi-monitor/DPI e browser real |
 | Próximo bloco | ANT-259 — extrair `AgentOrchestrator` incremental sem quebrar o runtime actual |
 
@@ -64,7 +64,7 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - `list_windows`, `inspect` e `find` são tratados como reads;
 - `click` e `set_text` são side effects e devolvem `delivered/verified` explícitos;
 - janela/controlo com múltiplos matches igualmente fortes falha fechado;
-- click só verifica transição estrutural/UIA ou foreground observável;
+- click só verifica uma transição estrutural/UIA; mudança isolada de foco ou foreground fica em evidence, mas não prova sucesso;
 - set_text relê o valor exacto;
 - texto real fica apenas em memória e não entra na evidence;
 - erro no readback depois de input entregue fica `delivered=true, verified=false`.
@@ -108,7 +108,7 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 
 ## Próxima sequência
 
-1. integrar PR #34 somente com a CI final do commit de documentação verde;
+1. obter revisão humana da PR #34 e integrar apenas com a CI final verde;
 2. ANT-259 — `AgentOrchestrator` incremental;
 3. ANT-260 — `ToolRouter` + `ExecutionEngine`;
 4. ANT-261/262 — Policy Engine + aprovação humana vinculada;
