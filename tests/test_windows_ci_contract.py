@@ -27,6 +27,13 @@ class WindowsCIContractTests(unittest.TestCase):
         ):
             self.assertIn(step, windows_block)
 
+    def test_compile_gate_covers_canonical_entrypoint_and_packages(self):
+        compile_line = (
+            "python -m compileall -q actions config core dashboard memory plugins "
+            "scripts ui antonella.py main.py ui.py setup.py"
+        )
+        self.assertGreaterEqual(self.workflow.count(compile_line), 2)
+
     def test_import_smoke_is_wired_and_utf8_is_pinned(self):
         windows_block = self.workflow.split("windows-baseline:", 1)[1]
         self.assertIn("python scripts/ci_import_smoke.py", windows_block)
