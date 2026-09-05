@@ -125,6 +125,10 @@ _ALWAYS_WRITE_TOOLS = {
     "manage_monitor",
 }
 
+_PRIVILEGED_TOOLS = {
+    "dev_agent",
+}
+
 
 class PolicyEngine:
     """Provider-independent deterministic safety classification for tool effects.
@@ -153,7 +157,16 @@ class PolicyEngine:
                 reason="This operation is blocked by Antonella's local security policy.",
             )
 
-        if name in _FINANCIAL_TOOLS or action in {"pay", "payment", "purchase", "buy", "sell", "trade", "transfer", "wire"}:
+        if name in _FINANCIAL_TOOLS or action in {
+            "pay",
+            "payment",
+            "purchase",
+            "buy",
+            "sell",
+            "trade",
+            "transfer",
+            "wire",
+        }:
             return PolicyDecision(
                 effect=PolicyEffect.FINANCIAL,
                 allowed=True,
@@ -180,13 +193,11 @@ class PolicyEngine:
                 reason="Destructive or shutdown effects require explicit human approval.",
             )
 
-        if action in _PRIVILEGED_ACTIONS:
-            return PolicyDecision(
-                effect=PolicyEffect.PRIVILEGED,
-                allowed=True,
-                requires_approval=True,
-                rule_id="approval.privileged",
-                reason="Privileged system changes require explicit human approval.",
+        if name in _PRIVILEGED_TOOLS or action in _PRIVILEGED_ACTIONS:
+            return self._approval(
+                PolicyEffect.PRIVILEGED,
+                "approval.privileged",
+                "Privileged system or code execution requires explicit human approval.",
             )
 
         if name == "file_controller":
@@ -195,19 +206,50 @@ class PolicyEngine:
             return self._write("write.filesystem")
 
         if name == "file_processor":
-            if action in {"summarize", "extract_text", "info", "analyze", "stats", "validate", "word_count", "explain", "review", "list"}:
+            if action in {
+                "summarize",
+                "extract_text",
+                "info",
+                "analyze",
+                "stats",
+                "validate",
+                "word_count",
+                "explain",
+                "review",
+                "list",
+            }:
                 return self._read("read.file_processor")
             if action in {"run", "test"}:
-                return PolicyDecision(
-                    effect=PolicyEffect.PRIVILEGED,
-                    allowed=True,
-                    requires_approval=True,
-                    rule_id="approval.code_execution",
-                    reason="Executing user-provided code requires explicit human approval.",
+                return self._approval(
+                    PolicyEffect.PRIVILEGED,
+                    "approval.code_execution",
+                    "Executing user-provided code requires explicit human approval.",
                 )
             return self._write("write.file_processor")
 
-        if name in {"computer_settings", "computer_control", "desktop_control", "verified_desktop_control"}:
+        if name == "code_helper":
+            if action == "explain":
+                return self._read("read.code_helper")
+            if action in {"run", "build"}:
+                return self._approval(
+                    PolicyEffect.PRIVILEGED,
+                    "approval.code_execution",
+                    "Running generated or user-provided code requires explicit human approval.",
+                )
+            return self._write("write.code_helper")
+
+        if name == "desktop_control":
+            if action in {"list", "stats", "current_wallpaper"}:
+                return self._read("read.desktop")
+            if action == "task" or (not action and str(params.get("task") or "").strip()):
+                return self._approval(
+                    PolicyEffect.PRIVILEGED,
+                    "approval.model_generated_desktop_code",
+                    "Model-generated desktop code requires explicit human approval before execution.",
+                )
+            return self._write("write.desktop")
+
+        if name in {"computer_settings", "computer_control", "verified_desktop_control"}:
             if action in _READ_ACTIONS:
                 return self._read("read.desktop")
             return self._write("write.desktop")
@@ -252,4 +294,15 @@ class PolicyEngine:
             requires_approval=False,
             rule_id=rule_id,
             reason="Non-destructive local write or interaction.",
+        )
+
+    # -.-.-.-
+    @staticmethod
+    def _approval(effect: PolicyEffect, rule_id: str, reason: str) -> PolicyDecision:
+        return PolicyDecision(
+            effect=effect,
+            allowed=True,
+            requires_approval=True,
+            rule_id=rule_id,
+            reason=reason,
         )
