@@ -150,15 +150,50 @@ def _foreground_window_snapshot() -> dict[str, Any]:
 
 
 # -.-.-.-
-def verify_open_app_postcondition(app_name: str) -> ExecutionResult:
+def capture_open_app_state(app_name: str) -> dict[str, Any]:
+    """Capture the observable Windows state used to attribute an app launch."""
+    if platform.system() != "Windows":
+        return {}
+
+    expected = _expected_windows_processes(app_name)
+    processes = _running_process_matches(expected)
+    pids = {int(item["pid"]) for item in processes if int(item.get("pid") or 0) > 0}
+    windows = _visible_windows_for_pids(pids)
+    return {
+        "expected_processes": sorted(expected),
+        "processes": processes[:10],
+        "visible_windows": windows[:10],
+        "foreground": _foreground_window_snapshot(),
+    }
+
+
+# -.-.-.-
+def capture_postcondition_state(
+    tool_name: str,
+    args: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    name = str(tool_name or "").strip().lower()
+    params = args or {}
+    if name == "open_app":
+        return capture_open_app_state(str(params.get("app_name") or "").strip())
+    return {}
+
+
+# -.-.-.-
+def verify_open_app_postcondition(
+    app_name: str,
+    *,
+    before_state: Mapping[str, Any] | None = None,
+) -> ExecutionResult:
     if platform.system() != "Windows":
         return ExecutionResult.unverified_delivery(
             "open_app",
             message="Application launch was requested; this postcondition verifier currently targets Windows.",
         )
 
-    expected = _expected_windows_processes(app_name)
-    processes = _running_process_matches(expected)
+    after = capture_open_app_state(app_name)
+    expected = set(after.get("expected_processes") or _expected_windows_processes(app_name))
+    processes = list(after.get("processes") or [])
     if not processes:
         return ExecutionResult.failure(
             "open_app",
@@ -167,20 +202,72 @@ def verify_open_app_postcondition(app_name: str) -> ExecutionResult:
             evidence={"expected_processes": sorted(expected)},
         )
 
-    pids = {int(item["pid"]) for item in processes if int(item.get("pid") or 0) > 0}
-    windows = _visible_windows_for_pids(pids)
-    evidence = {
-        "expected_processes": sorted(expected),
-        "processes": processes[:10],
-        "visible_windows": windows[:10],
+    if before_state is None:
+        return ExecutionResult.unverified_delivery(
+            "open_app",
+            evidence={"after": after},
+            message=(
+                f"Application '{app_name}' is running, but no pre-action state was captured "
+                "to attribute that state to this request."
+            ),
+        )
+
+    before = dict(before_state)
+    before_pids = {
+        int(item.get("pid") or 0)
+        for item in before.get("processes", [])
+        if isinstance(item, Mapping)
     }
-    return ExecutionResult.verified_success(
+    after_pids = {
+        int(item.get("pid") or 0)
+        for item in processes
+        if isinstance(item, Mapping)
+    }
+    before_windows = {
+        int(item.get("hwnd") or 0)
+        for item in before.get("visible_windows", [])
+        if isinstance(item, Mapping)
+    }
+    after_windows = {
+        int(item.get("hwnd") or 0)
+        for item in after.get("visible_windows", [])
+        if isinstance(item, Mapping)
+    }
+    before_foreground = (
+        before.get("foreground") if isinstance(before.get("foreground"), Mapping) else {}
+    )
+    after_foreground = (
+        after.get("foreground") if isinstance(after.get("foreground"), Mapping) else {}
+    )
+    foreground_pid = int(after_foreground.get("pid") or 0)
+    foreground_changed = bool(
+        after_foreground.get("hwnd")
+        and after_foreground.get("hwnd") != before_foreground.get("hwnd")
+        and foreground_pid in after_pids
+    )
+    delta = {
+        "new_process_pids": sorted(pid for pid in after_pids - before_pids if pid),
+        "new_window_handles": sorted(hwnd for hwnd in after_windows - before_windows if hwnd),
+        "foreground_changed_to_target": foreground_changed,
+    }
+    evidence = {
+        "before": before,
+        "after": after,
+        "delta": delta,
+    }
+    if delta["new_process_pids"] or delta["new_window_handles"] or foreground_changed:
+        return ExecutionResult.verified_success(
+            "open_app",
+            evidence=evidence,
+            message=f"An observable application transition was confirmed for '{app_name}'.",
+        )
+
+    return ExecutionResult.unverified_delivery(
         "open_app",
         evidence=evidence,
         message=(
-            f"Application '{app_name}' is running and a visible window was observed."
-            if windows
-            else f"Application '{app_name}' is running after the launch request."
+            f"Application '{app_name}' is running, but no observable change could be "
+            "attributed to this request."
         ),
     )
 
@@ -219,6 +306,8 @@ def verify_postcondition(
     tool_name: str,
     args: Mapping[str, Any] | None,
     raw_result: Any,
+    *,
+    before_state: Mapping[str, Any] | None = None,
 ) -> ExecutionResult:
     """Run the strongest available domain verifier, otherwise fail closed."""
     name = str(tool_name or "").strip().lower()
@@ -232,7 +321,7 @@ def verify_postcondition(
     if name == "open_app" and generic.delivered:
         app_name = str(params.get("app_name") or "").strip()
         if app_name:
-            return verify_open_app_postcondition(app_name)
+            return verify_open_app_postcondition(app_name, before_state=before_state)
 
     if name == "computer_control" and action == "focus_window" and generic.delivered:
         return verify_focus_window_postcondition(str(params.get("title") or ""))
