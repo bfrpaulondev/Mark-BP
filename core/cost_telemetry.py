@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import math
+import re
 import threading
 import time
 import uuid
@@ -13,6 +16,7 @@ from core.providers.contracts import ProviderUsage
 
 _MAX_TASKS = 256
 _MAX_EVENTS_PER_TASK = 128
+_SAFE_TASK_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,96}$")
 _ALLOWED_SAVED_CALL_CATEGORIES = {
     "computer_use_batch",
     "cache_hit",
@@ -97,9 +101,14 @@ class _TaskCostState:
 # -.-.-.-
 def _safe_task_id(value: str | None) -> str:
     raw = str(value or "").strip()
-    if raw:
-        return raw[:96]
-    return uuid.uuid4().hex[:16]
+    if not raw:
+        return uuid.uuid4().hex[:16]
+    if _SAFE_TASK_ID_RE.fullmatch(raw):
+        return raw
+    # Task IDs are identifiers, not a storage channel. Preserve correlation for
+    # arbitrary caller strings through a deterministic digest without retaining text.
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return f"task-{digest}"
 
 
 # -.-.-.-
@@ -115,7 +124,7 @@ def _optional_non_negative_float(value: Any) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    if number < 0:
+    if number < 0 or not math.isfinite(number):
         return None
     return number
 
@@ -205,6 +214,8 @@ def estimate_usage_cost_usd(
         cost += cached_tokens * float(pricing.cached_input_per_million or 0.0) / 1_000_000
     if priced_output_tokens:
         cost += priced_output_tokens * float(pricing.output_per_million or 0.0) / 1_000_000
+    if not math.isfinite(cost):
+        return None
     return round(cost, 12)
 
 
