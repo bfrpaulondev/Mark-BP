@@ -4,7 +4,7 @@ import inspect
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -111,8 +111,8 @@ class AgentOrchestrator:
             metadata={"argument_names": sorted(str(key) for key in params)},
         )
 
-        # ANT-261 will replace this pass-through boundary with the central Policy Engine.
-        # It is intentionally explicit now so execution can no longer bypass the future gate.
+        # ANT-261 will replace this explicit boundary with the central Policy Engine.
+        # No new authorization decision is made by ANT-259; legacy behaviour is preserved.
         self._emit(
             events,
             correlation_id,
@@ -184,6 +184,8 @@ class AgentOrchestrator:
                 payload.get("result"),
                 before_state=before_state,
             )
+            if not execution.correlation_id:
+                execution = replace(execution, correlation_id=correlation_id)
             payload["execution"] = execution.to_dict()
             if not execution.can_claim_success:
                 payload["verification_note"] = (
