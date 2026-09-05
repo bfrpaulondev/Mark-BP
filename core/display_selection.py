@@ -120,6 +120,7 @@ def select_monitor(
     *,
     point: tuple[int, int] | None = None,
     hint: int | str | None = None,
+    strict_hint: bool = False,
 ) -> Mapping[str, Any]:
     if not monitors:
         raise ValueError("No monitors available")
@@ -127,8 +128,14 @@ def select_monitor(
     normalized_hint = normalize_monitor_hint(hint)
     if normalized_hint == "all":
         return monitors[0]
-    if isinstance(normalized_hint, int) and 1 <= normalized_hint < len(monitors):
-        return monitors[normalized_hint]
+    if isinstance(normalized_hint, int):
+        if 1 <= normalized_hint < len(monitors):
+            return monitors[normalized_hint]
+        if strict_hint:
+            available = max(0, len(monitors) - 1)
+            raise ValueError(
+                f"Requested monitor {normalized_hint} is unavailable; {available} real monitor(s) are currently connected."
+            )
 
     if point is not None:
         x, y = point
