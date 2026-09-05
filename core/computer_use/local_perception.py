@@ -42,6 +42,8 @@ _RISKY_TERMS = {
     "submit",
     "publish",
     "post",
+    "upload",
+    "download",
     "buy",
     "purchase",
     "pay",
@@ -56,6 +58,8 @@ _RISKY_TERMS = {
     "uninstall",
     "login",
     "signin",
+    "run",
+    "execute",
     "shutdown",
     "restart",
     "apagar",
@@ -65,6 +69,8 @@ _RISKY_TERMS = {
     "enviar",
     "submeter",
     "publicar",
+    "carregar",
+    "descarregar",
     "comprar",
     "pagar",
     "transferir",
@@ -79,8 +85,23 @@ _RISKY_TERMS = {
     "desinstalar",
     "entrar",
     "autenticar",
+    "executar",
     "desligar",
     "reiniciar",
+}
+_RISKY_PHRASES = {
+    "sign in",
+    "log in",
+    "place order",
+    "grant access",
+    "revoke access",
+    "save changes",
+    "confirm changes",
+    "alterar permissões",
+    "conceder acesso",
+    "revogar acesso",
+    "guardar alterações",
+    "confirmar alterações",
 }
 _GENERIC_COMMIT_LABELS = {
     "ok",
@@ -164,7 +185,12 @@ class LocalPerceptionPlanner:
         cached = self._get_cached(cache_key)
         if cached is not None:
             return LocalPerceptionSuggestion(
-                action=_action_for_point(cached.x, cached.y, cached.control_type),
+                action=_action_for_point(
+                    cached.x,
+                    cached.y,
+                    cached.control_type,
+                    safety_context=target,
+                ),
                 source="uia_cache",
                 cache_hit=True,
             )
@@ -216,7 +242,12 @@ class LocalPerceptionPlanner:
             ),
         )
         return LocalPerceptionSuggestion(
-            action=_action_for_point(image_x, image_y, control_type),
+            action=_action_for_point(
+                image_x,
+                image_y,
+                control_type,
+                safety_context=target,
+            ),
             source="uia",
             cache_hit=False,
         )
@@ -310,6 +341,8 @@ def _contains_risky_term(value: Any) -> bool:
     normalized = _normalize_label(value)
     if not normalized:
         return False
+    if any(phrase in normalized for phrase in _RISKY_PHRASES):
+        return True
     tokens = set(re.findall(r"[\wÀ-ÿ]+", normalized, flags=re.UNICODE))
     return any(term in tokens for term in _RISKY_TERMS)
 
@@ -341,7 +374,13 @@ def _screen_to_image(frame: FrameSnapshot, x: int, y: int) -> tuple[int, int] | 
 
 
 # -.-.-.-
-def _action_for_point(x: int, y: int, control_type: str) -> ComputerAction:
+def _action_for_point(
+    x: int,
+    y: int,
+    control_type: str,
+    *,
+    safety_context: str,
+) -> ComputerAction:
     return ComputerAction(
         action="click",
         description=f"Activate unique local UIA {str(control_type or 'control')[:48]}",
@@ -350,6 +389,7 @@ def _action_for_point(x: int, y: int, control_type: str) -> ComputerAction:
         confidence=1.0,
         risk="low",
         reobserve=True,
+        safety_context=str(safety_context or "")[:160],
     )
 
 
