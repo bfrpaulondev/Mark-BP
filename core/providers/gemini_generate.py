@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.providers.contracts import ProviderResponse, ProviderUsage
+
 
 class GeminiGenerateClient:
     """Small non-realtime Gemini adapter used by the provider router.
@@ -22,7 +24,7 @@ class GeminiGenerateClient:
         model: str,
         prompt: str,
         reasoning_effort: str = "low",
-    ) -> str:
+    ) -> ProviderResponse:
         del reasoning_effort  # Provider-neutral hint; not required by this stable adapter.
         try:
             from google import genai
@@ -39,7 +41,10 @@ class GeminiGenerateClient:
         text = str(getattr(response, "text", "") or "").strip()
         if not text:
             raise RuntimeError("Gemini response contained no output text.")
-        return text
+        return ProviderResponse(
+            text=text,
+            usage=extract_gemini_usage(getattr(response, "usage_metadata", None)),
+        )
 
     # -.-.-.-
     def analyze_image(
@@ -51,7 +56,7 @@ class GeminiGenerateClient:
         mime_type: str = "image/jpeg",
         detail: str = "low",
         reasoning_effort: str = "low",
-    ) -> str:
+    ) -> ProviderResponse:
         del detail, reasoning_effort  # Provider-neutral hints; Gemini accepts the image directly.
         try:
             from google import genai
@@ -73,4 +78,60 @@ class GeminiGenerateClient:
         text = str(getattr(response, "text", "") or "").strip()
         if not text:
             raise RuntimeError("Gemini response contained no output text.")
-        return text
+        return ProviderResponse(
+            text=text,
+            usage=extract_gemini_usage(getattr(response, "usage_metadata", None)),
+        )
+
+
+def _usage_value(metadata: Any, *names: str) -> int:
+    for name in names:
+        value: Any = None
+        if isinstance(metadata, dict):
+            value = metadata.get(name)
+        else:
+            value = getattr(metadata, name, None)
+        if value is None:
+            continue
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def extract_gemini_usage(metadata: Any) -> ProviderUsage:
+    if metadata is None:
+        return ProviderUsage()
+
+    input_tokens = _usage_value(
+        metadata,
+        "prompt_token_count",
+        "promptTokenCount",
+    )
+    output_tokens = _usage_value(
+        metadata,
+        "candidates_token_count",
+        "candidatesTokenCount",
+    )
+    total_tokens = _usage_value(
+        metadata,
+        "total_token_count",
+        "totalTokenCount",
+    ) or (input_tokens + output_tokens)
+
+    return ProviderUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_input_tokens=_usage_value(
+            metadata,
+            "cached_content_token_count",
+            "cachedContentTokenCount",
+        ),
+        reasoning_tokens=_usage_value(
+            metadata,
+            "thoughts_token_count",
+            "thoughtsTokenCount",
+        ),
+        total_tokens=total_tokens,
+    )
