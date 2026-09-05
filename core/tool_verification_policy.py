@@ -9,6 +9,7 @@ _ALWAYS_VERIFY = {
     "computer_control",
     "computer_settings",
     "verified_desktop_control",
+    "verified_browser_automation",
     "windows_ui_automation",
     "send_message",
     "reminder",
