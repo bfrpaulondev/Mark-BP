@@ -107,6 +107,7 @@ class RealtimeComputerUseSession:
 
     def _run(self, *, config: dict[str, Any], max_steps_override: int | None) -> None:
         capture = None
+        planner = None
         try:
             from core.computer_use.actuator import execute_action
             from core.computer_use.capture import RealtimeDesktopCapture
@@ -125,6 +126,7 @@ class RealtimeComputerUseSession:
             with self._lock:
                 self._state.provider = planner.last_provider
                 self._state.model = planner.last_model
+                self._state.telemetry_task_id = planner.telemetry_task_id
 
             last_logged_provider = planner.last_provider
             last_logged_model = planner.last_model
@@ -203,6 +205,7 @@ class RealtimeComputerUseSession:
                     self._state.model_calls = planner.provider_attempts
                     self._state.provider = planner.last_provider
                     self._state.model = planner.last_model
+                self._apply_cost_snapshot(planner.telemetry_snapshot())
 
                 if (
                     planner.last_provider != last_logged_provider
@@ -233,6 +236,9 @@ class RealtimeComputerUseSession:
                         if batch_index > 0:
                             self._state.batched_actions += 1
                             self._state.saved_model_calls += 1
+                    if batch_index > 0:
+                        planner.record_saved_model_call()
+                        self._apply_cost_snapshot(planner.telemetry_snapshot())
 
                     if action.action == "done":
                         result = action.result or action.description or "Objective completed."
@@ -353,11 +359,33 @@ class RealtimeComputerUseSession:
             self._finish("failed", error=str(exc))
             self._log(f"Computer Use · error: {exc}")
         finally:
+            if planner is not None:
+                try:
+                    self._apply_cost_snapshot(planner.finish_telemetry())
+                except Exception:
+                    pass
             if capture is not None:
                 try:
                     capture.stop()
                 except Exception:
                     pass
+
+    def _apply_cost_snapshot(self, snapshot: dict[str, Any] | None) -> None:
+        if not isinstance(snapshot, dict):
+            return
+        with self._lock:
+            self._state.telemetry_task_id = str(snapshot.get("task_id") or "")
+            self._state.input_tokens = int(snapshot.get("input_tokens") or 0)
+            self._state.output_tokens = int(snapshot.get("output_tokens") or 0)
+            self._state.cached_input_tokens = int(
+                snapshot.get("cached_input_tokens") or 0
+            )
+            estimated = snapshot.get("estimated_cost_usd")
+            self._state.estimated_cost_usd = (
+                float(estimated) if estimated is not None else None
+            )
+            self._state.known_cost_usd = float(snapshot.get("known_cost_usd") or 0.0)
+            self._state.cost_complete = bool(snapshot.get("cost_complete", False))
 
     def _finish(
         self,

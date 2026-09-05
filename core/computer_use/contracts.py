@@ -109,6 +109,13 @@ class SessionState:
     awaiting_approval: bool = False
     monitor_index: int | None = None
     history: list[str] = field(default_factory=list)
+    telemetry_task_id: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_input_tokens: int = 0
+    estimated_cost_usd: float | None = None
+    known_cost_usd: float = 0.0
+    cost_complete: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +139,13 @@ class SessionState:
             "awaiting_approval": self.awaiting_approval,
             "monitor_index": self.monitor_index,
             "history": list(self.history[-12:]),
+            "telemetry_task_id": self.telemetry_task_id,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cached_input_tokens": self.cached_input_tokens,
+            "estimated_cost_usd": self.estimated_cost_usd,
+            "known_cost_usd": self.known_cost_usd,
+            "cost_complete": self.cost_complete,
         }
 
 

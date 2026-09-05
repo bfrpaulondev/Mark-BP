@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+from core.providers.contracts import ProviderResponse, ProviderUsage
+
 
 class OpenAIResponsesClient:
     ENDPOINT = "https://api.openai.com/v1/responses"
@@ -19,7 +21,7 @@ class OpenAIResponsesClient:
         model: str,
         prompt: str,
         reasoning_effort: str = "low",
-    ) -> str:
+    ) -> ProviderResponse:
         payload = {
             "model": model,
             "input": prompt,
@@ -38,7 +40,7 @@ class OpenAIResponsesClient:
         mime_type: str = "image/jpeg",
         detail: str = "low",
         reasoning_effort: str = "low",
-    ) -> str:
+    ) -> ProviderResponse:
         image_url = (
             f"data:{mime_type};base64,"
             + base64.b64encode(image_bytes).decode("ascii")
@@ -64,7 +66,7 @@ class OpenAIResponsesClient:
         }
         return self._request(payload)
 
-    def _request(self, payload: dict[str, Any]) -> str:
+    def _request(self, payload: dict[str, Any]) -> ProviderResponse:
         try:
             import requests
         except ImportError as exc:
@@ -100,7 +102,48 @@ class OpenAIResponsesClient:
         text = extract_output_text(data)
         if not text:
             raise RuntimeError("OpenAI response contained no output text.")
-        return text
+        return ProviderResponse(
+            text=text,
+            usage=extract_openai_usage(data),
+            request_id=str(response.headers.get("x-request-id", "") or ""),
+        )
+
+
+def _safe_count(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def extract_openai_usage(payload: dict[str, Any]) -> ProviderUsage:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return ProviderUsage()
+
+    input_tokens = _safe_count(usage.get("input_tokens"))
+    output_tokens = _safe_count(usage.get("output_tokens"))
+    total_tokens = _safe_count(usage.get("total_tokens")) or (
+        input_tokens + output_tokens
+    )
+
+    input_details = usage.get("input_tokens_details")
+    if not isinstance(input_details, dict):
+        input_details = {}
+    output_details = usage.get("output_tokens_details")
+    if not isinstance(output_details, dict):
+        output_details = {}
+
+    return ProviderUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_input_tokens=_safe_count(input_details.get("cached_tokens")),
+        reasoning_tokens=_safe_count(output_details.get("reasoning_tokens")),
+        total_tokens=total_tokens,
+        # Responses API reports reasoning_tokens as a breakdown of output_tokens,
+        # so adding it again would double count the priced output.
+        billable_output_tokens=output_tokens,
+    )
 
 
 def extract_output_text(payload: dict[str, Any]) -> str:
