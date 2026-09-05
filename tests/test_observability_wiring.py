@@ -94,10 +94,13 @@ class StructuredObservabilityPrivacyTests(unittest.TestCase):
             pricing=pricing,
         )
         snapshot = telemetry.finish_task(task_id)
+        second_snapshot = telemetry.finish_task(task_id)
 
         rows = _rows(stream)
         attempt = next(row for row in rows if row.get("event") == "provider.attempt")
-        summary = next(row for row in rows if row.get("event") == "provider.task_finished")
+        summaries = [row for row in rows if row.get("event") == "provider.task_finished"]
+        self.assertEqual(len(summaries), 1)
+        summary = summaries[0]
 
         self.assertEqual(attempt["task_id"], task_id)
         self.assertEqual(attempt["provider"], "openai")
@@ -108,7 +111,9 @@ class StructuredObservabilityPrivacyTests(unittest.TestCase):
         self.assertEqual(attempt["output_tokens"], 25)
         self.assertIsNotNone(attempt["cost_usd"])
         self.assertTrue(summary["cost_complete"])
+        self.assertTrue(summary["ok"])
         self.assertEqual(summary["cost_usd"], snapshot["estimated_cost_usd"])
+        self.assertEqual(snapshot, second_snapshot)
 
         serialized = stream.getvalue().lower()
         self.assertNotIn("prompt", serialized)
