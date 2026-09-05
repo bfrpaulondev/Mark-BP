@@ -39,7 +39,7 @@ quando não pode → informa claramente sem inventar sucesso
 ## P1 — custo, percepção e Computer Use
 
 - [x] **ANT-264 — Telemetria de custo por tarefa.** PR #43 integrada em `main`: usage provider-neutral, latência/retry/fallback, calls saved/cache hits, registry bounded/content-free e custo somente com pricing explícito configurado. Billing real do provider permanece fonte de verdade financeira.
-- [ ] **ANT-265 — Cache e percepção local.** PR #45 em review: frame/keyframe cache bounded/content-free, exact-digest duplicate classification e rota UIA-first apenas para primeiro click explícito, único e de baixo risco. Contexto semântico local usado pela safety permanece transitório e não entra em histórico/telemetria. Não marcar concluído antes de CI/review/merge final.
+- [x] **ANT-265 — Cache e percepção local.** PR #45 integrada em `main` após principal review e CI Linux/Windows 3.11/3.12: frame/keyframe cache bounded/content-free, exact-digest classification, UIA-first apenas para primeiro click explícito/único/baixo risco, telemetria de chamadas poupadas e `safety_context` transitório que não entra em histórico/telemetria. E2E físico continua no ANT-275.
 - [ ] **ANT-266 — Hardening ScreenConnect.** Target-window locking/reacquisition, settle adaptativo, scroll verificável, recuperação, pause/resume/cancel e frames efémeros por default.
 - [ ] **ANT-267 — Melhorar Computer Use recovery.** Replanning quando UI muda, state tracking, bounded retries e evidência de conclusão.
 
