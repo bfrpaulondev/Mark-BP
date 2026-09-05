@@ -196,7 +196,10 @@ def _same_object(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
     if before.get("kind") != after.get("kind"):
         return False
     if before.get("kind") == "file":
-        if int(before.get("size") or -1) != int(after.get("size") or -2):
+        try:
+            if int(before.get("size")) != int(after.get("size")):
+                return False
+        except (TypeError, ValueError):
             return False
         before_hash = str(before.get("sha256") or "")
         after_hash = str(after.get("sha256") or "")
@@ -266,29 +269,34 @@ def verify_file_postcondition(
         evidence["before_destination"] = _public(before_dest)
         evidence["after_destination"] = _public(after_dest)
 
-    if action in {"create_file", "create_folder"}:
-        expected_kind = "directory" if action == "create_folder" else "file"
-        if after_source.get("exists") and after_source.get("kind") == expected_kind:
-            if action == "create_file":
-                expected_bytes = str(params.get("content") or "").encode("utf-8")
-                evidence["expected_size"] = len(expected_bytes)
-                actual_size = int(after_source.get("size") or 0)
-                digest = str(after_source.get("sha256") or "")
-                expected_digest = _payload_digest(expected_bytes)
-                if actual_size != len(expected_bytes):
-                    return ExecutionResult.failure(
-                        result_action,
-                        "Created file size did not match the requested content.",
-                        delivered=True,
-                        evidence=evidence,
-                    )
-                if not digest or digest != expected_digest:
-                    return ExecutionResult.failure(
-                        result_action,
-                        "Created file content digest did not match the request.",
-                        delivered=True,
-                        evidence=evidence,
-                    )
+    if action == "create_folder":
+        created = (
+            not before_source.get("exists")
+            and after_source.get("exists")
+            and after_source.get("kind") == "directory"
+        )
+        if created:
+            return ExecutionResult.verified_success(result_action, evidence=evidence)
+
+    elif action == "create_file":
+        expected_bytes = str(params.get("content") or "").encode("utf-8")
+        evidence["expected_size"] = len(expected_bytes)
+        actual_size = int(after_source.get("size") or 0)
+        digest = str(after_source.get("sha256") or "")
+        expected_digest = _payload_digest(expected_bytes)
+        exact_content = bool(
+            after_source.get("exists")
+            and after_source.get("kind") == "file"
+            and actual_size == len(expected_bytes)
+            and digest == expected_digest
+        )
+        observable_transition = bool(
+            not before_source.get("exists")
+            or str(before_source.get("sha256") or "") != digest
+            or before_source.get("mtime_ns") != after_source.get("mtime_ns")
+        )
+        evidence["observable_transition"] = observable_transition
+        if exact_content and observable_transition:
             return ExecutionResult.verified_success(result_action, evidence=evidence)
 
     elif action == "write":
