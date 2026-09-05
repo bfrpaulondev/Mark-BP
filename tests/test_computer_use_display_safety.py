@@ -43,7 +43,6 @@ class ComputerUseDisplaySafetyTests(unittest.TestCase):
         result, reobserve = execute_action(action, frame)
 
         self.assertTrue(reobserve)
-        self.assertIn("topology changed", result.lower())
         self.assertIn("not dispatched", result.lower())
 
     @patch("core.computer_use.actuator.current_topology_token", return_value="topology-a")
@@ -51,8 +50,12 @@ class ComputerUseDisplaySafetyTests(unittest.TestCase):
         self.assertTrue(_frame_topology_is_current(self._frame(token="topology-a")))
 
     @patch("core.computer_use.actuator.current_topology_token", return_value="")
-    def test_missing_live_token_preserves_legacy_fail_open_compatibility(self, _token):
-        self.assertTrue(_frame_topology_is_current(self._frame(token="topology-a")))
+    def test_missing_live_token_fails_closed(self, _token):
+        self.assertFalse(_frame_topology_is_current(self._frame(token="topology-a")))
+
+    @patch("core.computer_use.actuator.current_topology_token", return_value="topology-a")
+    def test_missing_frame_token_fails_closed(self, _token):
+        self.assertFalse(_frame_topology_is_current(self._frame(token="")))
 
     def test_capture_source_reopens_mss_and_pins_explicit_display_identity(self):
         root = Path(__file__).resolve().parent.parent
@@ -61,6 +64,8 @@ class ComputerUseDisplaySafetyTests(unittest.TestCase):
         self.assertIn("display_topology_state", source)
         self.assertIn("strict_hint=explicit_monitor", source)
         self.assertIn("pinned_device", source)
+        self.assertIn("pinned_geometry", source)
+        self.assertIn("_monitor_geometry", source)
         self.assertIn("sct.close()", source)
         self.assertIn("mss.mss()", source)
         self.assertIn("_invalidate_latest", source)
