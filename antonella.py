@@ -6,7 +6,12 @@ from datetime import datetime
 
 from config import get_config
 from core.local_command_router import execute_local_intent, parse_local_text_command
-from core.postcondition_verifiers import verify_open_app_postcondition, verify_postcondition
+from core.postcondition_verifiers import (
+    capture_open_app_state,
+    capture_postcondition_state,
+    verify_open_app_postcondition,
+    verify_postcondition,
+)
 from core.tool_verification_policy import requires_postcondition
 from google.genai import types
 from main import (
@@ -111,11 +116,17 @@ class AntonellaLive(JarvisLive):
         self._session_log.append(f"User: {user_text}")
 
         def _execute() -> None:
+            app_name = str(intent.args.get("app_name") or "").strip()
+            before_state = (
+                capture_open_app_state(app_name) if intent.kind == "open_app" else None
+            )
             result = execute_local_intent(intent, player=self.ui)
             message = result.message or "Comando local concluído."
             if intent.kind == "open_app" and not result.verified:
-                app_name = str(intent.args.get("app_name") or "").strip()
-                verification = verify_open_app_postcondition(app_name)
+                verification = verify_open_app_postcondition(
+                    app_name,
+                    before_state=before_state,
+                )
                 self.ui.write_log(
                     "SYS: verify · fast-path open_app · "
                     f"delivered={verification.delivered} · verified={verification.verified}"
@@ -138,10 +149,14 @@ class AntonellaLive(JarvisLive):
     # -.-.-.-
     async def _execute_tool(self, fc) -> types.FunctionResponse:
         """Attach fail-closed execution evidence to side-effecting tool results."""
-        base_response = await super()._execute_tool(fc)
         name = str(fc.name or "")
         args = dict(fc.args or {})
-        if not requires_postcondition(name, args):
+        needs_postcondition = requires_postcondition(name, args)
+        before_state = (
+            capture_postcondition_state(name, args) if needs_postcondition else None
+        )
+        base_response = await super()._execute_tool(fc)
+        if not needs_postcondition:
             return base_response
 
         try:
@@ -152,7 +167,12 @@ class AntonellaLive(JarvisLive):
         raw_result = payload.get("result")
         action_suffix = str(args.get("action") or "").strip()
         action_name = f"{name}.{action_suffix}" if action_suffix else name
-        execution = verify_postcondition(name, args, raw_result)
+        execution = verify_postcondition(
+            name,
+            args,
+            raw_result,
+            before_state=before_state,
+        )
         payload["execution"] = execution.to_dict()
         if not execution.can_claim_success:
             payload["verification_note"] = (
