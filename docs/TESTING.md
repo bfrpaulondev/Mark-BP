@@ -60,6 +60,32 @@ Valida:
 6. clicar em `CUSTO` ou `ESPECIALISTA` abre Preferências;
 7. análise visual segue por defeito o monitor onde está a janela foreground.
 
+## Local Command Fast Path — zero novo turno LLM
+
+Na barra de texto, testa comandos simples:
+
+```text
+abre Bloco de Notas
+scroll para baixo
+que ecrãs tenho?
+status do sistema
+status do agente
+modo económico
+/provider auto
+```
+
+No REGISTO deve aparecer `fast path local`. Estes comandos não devem ser enviados como um novo turno para Gemini/OpenAI.
+
+Também testa pedidos que **não** podem ser interceptados:
+
+```text
+abre Chrome e pesquisa documentação do FastAPI
+abre Chrome e depois preenche o formulário
+explica-me a arquitectura do projecto
+```
+
+Nestes casos não deve aparecer `fast path local`; o pedido deve seguir para o cérebro principal. O parser local deve permanecer conservador: é preferível deixar um pedido ambíguo para o cérebro do que executar localmente uma intenção errada.
+
 ## Browser real — navegação entre abas com verificação
 
 Abre Chrome, Edge ou Firefox normalmente com pelo menos duas abas diferentes e deixa o browser visível.
