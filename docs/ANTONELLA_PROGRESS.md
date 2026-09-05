@@ -4,18 +4,18 @@
 
 **Última atualização:** 2026-09-05
 **Branch canónica:** `main`
-**Main confirmado:** `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`
+**Main confirmado:** `8b4371f15b312834743cdf08e07ad6a180d298ff`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | ANT-253 — Verifier central |
-| Branch ativa | `codex/execution-verifier-core` |
+| Tarefa ativa | ANT-254 — verificação de aplicações/janelas |
+| Branch ativa | `codex/verified-app-window-effects` |
 | Pull requests abertas | abrir apenas esta implementação quando reviewable |
 | Issues abertas | Nenhuma necessária para este trabalho |
-| Próximo teste real | Windows: fast path + browser real + rato + multi-monitor + ScreenConnect |
-| Próxima tarefa | ANT-254/255 — postconditions de apps/janelas e input desktop |
+| Próximo teste real | Windows: abrir Bloco de Notas/Chrome + focus + browser/rato + multi-monitor + ScreenConnect |
+| Próxima tarefa | concluir ANT-254; depois ANT-255 input desktop verificável |
 
 ## Prioridade aprovada em 2026-09-05
 
@@ -40,44 +40,37 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - PR #13: visão multi-monitor e identidade da sessão de visão.
 - PR #14–#22: Computer Use económico, especialista OpenAI, seleção de ecrãs, HUD, preferências, batching, painel do agente, captura por janela e controlo verificável de abas/rato.
 - PR #23: runtime-readiness; merge `2952eb9c26f4c04b8dbd6e945daf2395eebe6107`; CI verde em Python 3.11/3.12 e lock.
-- PR #24: Reliability Hardening Wave 1; merge `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`; ANT-251 Local Fast Path integrado e ANT-252 `ExecutionResult` canónico integrado. CI verde em Python 3.11/3.12 e lock.
+- PR #24: Reliability Hardening Wave 1; merge `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`; ANT-251 Local Fast Path + ANT-252 `ExecutionResult`; CI verde.
+- PR #25: Verifier central; merge `8b4371f15b312834743cdf08e07ad6a180d298ff`; respostas side-effecting recebem `execution` autoritativo e claims ficam fail-closed; CI verde em Python 3.11/3.12 e lock.
 
 ## ANT-251 — concluído e integrado
 
 - comandos simples/inequívocos podem ser resolvidos localmente sem novo turno LLM;
 - pedidos multi-etapa continuam para o cérebro principal;
 - router local não importa SDK Gemini/OpenAI;
-- `open_app`/`scroll` legados não são promovidos a sucesso verificado apenas pelo texto de retorno;
-- branch antiga `codex/local-command-fast-path` foi alinhada à `main` depois de o trabalho útil ser portado/supersedido.
+- branch antiga divergente foi alinhada depois de o trabalho útil ser portado.
 
-## ANT-252 — concluído e integrado
+## ANT-252/253 — concluídos e integrados
 
-`core/execution_result.py` define o contrato canónico com:
+- `ExecutionResult`: `ok`, `delivered`, `verified`, `evidence`, `error`, `risk`, `requires_approval`, `correlation_id`, `can_claim_success`;
+- `core/verifier.py` recusa inferir verificação a partir de `Done`, `Opened`, `Scrolled` ou ausência de exception;
+- `core/tool_verification_policy.py` identifica tools/actions mutantes que exigem postcondition;
+- `AntonellaLive._execute_tool` anexa `execution` antes de devolver o resultado ao modelo;
+- prompt trata `execution.can_claim_success=true` como condição autoritativa para anunciar conclusão.
 
-- `ok`;
-- `delivered`;
-- `verified`;
-- `evidence`;
-- `error`;
-- `risk`;
-- `requires_approval`;
-- `correlation_id`;
-- `can_claim_success`.
+## ANT-254 — em implementação
 
-`ok=true` ou ausência de exception não implicam `verified=true`.
+A branch `codex/verified-app-window-effects` introduz verifiers específicos, mantendo o fallback fail-closed do ANT-253:
 
-## ANT-253 — em implementação
+- `open_app` no Windows deixa de depender do texto `Opened X`;
+- mapeia aplicações conhecidas para processos esperados e observa processos via `psutil`;
+- recolhe janelas visíveis associadas aos PIDs via Win32 quando disponível;
+- só promove a `verified=true` quando a aplicação esperada está realmente em execução após o pedido;
+- `computer_control.focus_window` compara o título solicitado com a janela foreground real;
+- o Local Fast Path também revalida `open_app` antes de usar wording de sucesso;
+- em plataformas sem o verifier específico, mantém `verified=false` em vez de inventar sucesso.
 
-A branch `codex/execution-verifier-core` introduz:
-
-- `core/verifier.py` para converter resultados estruturados/legados sem inventar postconditions;
-- `core/tool_verification_policy.py` para identificar tools/actions que exigem evidência antes de claim de sucesso;
-- integração no `AntonellaLive._execute_tool`: respostas side-effecting recebem um objecto `execution` autoritativo antes de voltar ao modelo;
-- prompt actualizado: `execution.can_claim_success=true` é a condição runtime para anunciar conclusão;
-- strings legadas `Done`, `Opened`, `Scrolled`, etc. permanecem `verified=false` até um verifier específico provar o efeito;
-- testes fail-closed para structured JSON, erros inconsistentes, aprovação e tools mutantes.
-
-Esta slice ainda não substitui os verifiers específicos de cada domínio. ANT-254–258 continuam necessários para transformar entrega não verificada em sucesso comprovado quando tecnicamente possível.
+Ainda faltam nesta família minimize/maximize/switch com pre-state/target identity robustos; não marcar ANT-254 como concluída até cobrir/limitar esses casos e passar CI/E2E apropriados.
 
 ## Implementação integrada — Realtime Computer Use económico (E2E pendente)
 
@@ -94,13 +87,13 @@ Esta slice ainda não substitui os verifiers específicos de cada domínio. ANT-
 
 - O utilizador confirmou smoke anterior de UI/voz/Notepad, mas as novas slices precisam de novo E2E Windows após actualizar a `main`.
 - Unit tests/CI Linux não provam Win32, UIA, áudio físico, DPI, multi-monitor ou ScreenConnect.
-- Browser real e rato possuem verificação específica nos casos da PR #22; restantes tools estão agora a entrar no contrato universal.
+- Browser real e rato possuem verificação específica nos casos da PR #22; restantes tools estão a entrar no contrato universal.
 - O código herdado ainda concentra responsabilidades em `main.py`; a extração será incremental.
 
 ## Próxima sequência
 
-1. concluir ANT-253 e integrar apenas com CI verde;
-2. ANT-254/255: postconditions de app/window e mouse/keyboard/click/scroll/type;
+1. concluir ANT-254 e integrar apenas com CI verde;
+2. ANT-255: mouse/keyboard/click/scroll/type com pre/post state;
 3. ANT-256/257: browser real e multi-monitor/DPI hardening;
 4. ANT-258: UIA/files/settings;
 5. AgentOrchestrator/Policy Engine;
