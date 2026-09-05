@@ -117,6 +117,7 @@ class RealtimeComputerUseSession:
             planner = ComputerUsePlanner(
                 config,
                 cost_mode=self._state.cost_mode,
+                target_window=self._state.target_window,
             )
             budget = planner.route.budget
             max_steps = budget.max_steps
@@ -161,6 +162,7 @@ class RealtimeComputerUseSession:
                 self._state.visual_updates = frame.sequence
                 self._state.capture_scope = frame.capture_scope
                 self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+            self._apply_perception_stats(capture)
 
             requested = self._state.requested_monitor
             requested_text = "active" if requested is None else str(requested)
@@ -203,9 +205,18 @@ class RealtimeComputerUseSession:
                     # Count actual provider requests, including fallback, instead
                     # of reporting only logical planning turns.
                     self._state.model_calls = planner.provider_attempts
+                    self._state.saved_model_calls = planner.saved_model_calls
+                    self._state.local_perception_routes = planner.local_perception_routes
+                    self._state.perception_cache_hits = planner.perception_cache_hits
                     self._state.provider = planner.last_provider
                     self._state.model = planner.last_model
                 self._apply_cost_snapshot(planner.telemetry_snapshot())
+
+                if planner.last_plan_source in {"uia", "uia_cache"}:
+                    source = "cached UIA" if planner.last_plan_source == "uia_cache" else "UIA"
+                    self._log(
+                        f"Computer Use · local perception route ({source}) saved a VLM call"
+                    )
 
                 if (
                     planner.last_provider != last_logged_provider
@@ -235,9 +246,10 @@ class RealtimeComputerUseSession:
                         self._state.last_action = action.history_line()
                         if batch_index > 0:
                             self._state.batched_actions += 1
-                            self._state.saved_model_calls += 1
                     if batch_index > 0:
                         planner.record_saved_model_call()
+                        with self._lock:
+                            self._state.saved_model_calls = planner.saved_model_calls
                         self._apply_cost_snapshot(planner.telemetry_snapshot())
 
                     if action.action == "done":
@@ -314,6 +326,7 @@ class RealtimeComputerUseSession:
                             self._state.monitor_index = frame.monitor_index
                             self._state.capture_scope = frame.capture_scope
                             self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+                        self._apply_perception_stats(capture)
                         continue
 
                     if expects_visual_change:
@@ -341,6 +354,7 @@ class RealtimeComputerUseSession:
                         self._state.visual_updates = frame.sequence
                         self._state.capture_scope = frame.capture_scope
                         self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+                    self._apply_perception_stats(capture)
 
                     if no_change_count >= 3:
                         history.append(
@@ -366,6 +380,10 @@ class RealtimeComputerUseSession:
                     pass
             if capture is not None:
                 try:
+                    self._apply_perception_stats(capture)
+                except Exception:
+                    pass
+                try:
                     capture.stop()
                 except Exception:
                     pass
@@ -386,6 +404,19 @@ class RealtimeComputerUseSession:
             )
             self._state.known_cost_usd = float(snapshot.get("known_cost_usd") or 0.0)
             self._state.cost_complete = bool(snapshot.get("cost_complete", False))
+
+    def _apply_perception_stats(self, capture: Any) -> None:
+        try:
+            stats = capture.perception_stats()
+        except Exception:
+            return
+        if not isinstance(stats, dict):
+            return
+        with self._lock:
+            self._state.perception_keyframes = int(stats.get("keyframes") or 0)
+            self._state.perception_duplicates = int(
+                stats.get("duplicates_suppressed") or 0
+            )
 
     def _finish(
         self,

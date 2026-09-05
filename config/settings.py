@@ -61,6 +61,7 @@ class AntonellaSettings(BaseSettings):
     gemini_model_critic: str = "gemini-flash-latest"
     gemini_model_vision: str = "gemini-flash-latest"
     computer_use_cost_mode: Literal["economy", "balanced", "quality"] = "economy"
+    computer_use_local_perception_enabled: bool = True
     model_pricing_usd_per_million_tokens: dict[str, dict[str, float]] = Field(
         default_factory=dict
     )
@@ -194,6 +195,9 @@ def load_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
             "gemini_model_critic": settings.gemini_model_critic,
             "gemini_model_vision": settings.gemini_model_vision,
             "computer_use_cost_mode": settings.computer_use_cost_mode,
+            "computer_use_local_perception_enabled": (
+                settings.computer_use_local_perception_enabled
+            ),
             "model_pricing_usd_per_million_tokens": (
                 settings.model_pricing_usd_per_million_tokens
             ),

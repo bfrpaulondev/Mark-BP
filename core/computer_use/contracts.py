@@ -26,6 +26,10 @@ class FrameSnapshot:
     scale_y: float = 1.0
     monitor_device: str = ""
     monitor_primary: bool = False
+    perception_digest: str = ""
+    perception_keyframe: bool = True
+    perception_duplicate: bool = False
+    perception_distance: int | None = None
 
     def to_screen_coordinates(self, x: int, y: int) -> tuple[int, int]:
         """Map model-image pixels directly into physical virtual-desktop pixels.
@@ -61,6 +65,10 @@ class ComputerAction:
     risk: str = "low"
     result: str = ""
     reobserve: bool = True
+    # Local deterministic adapters may attach transient semantic context for
+    # safety classification. It is intentionally not accepted from model
+    # payloads and is never included in history_line()/SessionState evidence.
+    safety_context: str = ""
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ComputerAction":
@@ -103,6 +111,10 @@ class SessionState:
     saved_model_calls: int = 0
     capture_scope: str = "monitor"
     capture_savings_pct: int = 0
+    perception_keyframes: int = 0
+    perception_duplicates: int = 0
+    local_perception_routes: int = 0
+    perception_cache_hits: int = 0
     last_action: str = ""
     last_error: str = ""
     result: str = ""
@@ -133,6 +145,10 @@ class SessionState:
             "saved_model_calls": self.saved_model_calls,
             "capture_scope": self.capture_scope,
             "capture_savings_pct": self.capture_savings_pct,
+            "perception_keyframes": self.perception_keyframes,
+            "perception_duplicates": self.perception_duplicates,
+            "local_perception_routes": self.local_perception_routes,
+            "perception_cache_hits": self.perception_cache_hits,
             "last_action": self.last_action,
             "last_error": self.last_error,
             "result": self.result,
