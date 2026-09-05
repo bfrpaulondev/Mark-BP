@@ -13,6 +13,15 @@ class AntonellaLocalFastPathTests(unittest.TestCase):
         self.assertIn("fast path local", source)
         self.assertIn("antonella-local-", source)
 
+    def test_fast_path_open_app_rechecks_real_app_state(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "antonella.py").read_text(encoding="utf-8")
+
+        self.assertIn("verify_open_app_postcondition", source)
+        self.assertIn('intent.kind == "open_app"', source)
+        self.assertIn("verification.can_claim_success", source)
+        self.assertIn("fast-path open_app", source)
+
     def test_local_router_has_no_provider_sdk_dependency(self):
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "local_command_router.py").read_text(encoding="utf-8")
