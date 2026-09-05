@@ -505,8 +505,16 @@ def windows_ui_automation(
             before = _control_state(control)
             method = _set_control_text(control, requested, bool(params.get("clear_first", True)))
             time.sleep(0.08)
-            refreshed = _refind(window, params)
-            after = _control_state(refreshed[0]) if refreshed else {}
+
+            after: dict[str, Any] = {}
+            readback_error = False
+            try:
+                refreshed = _refind(window, params)
+                if refreshed:
+                    after = _control_state(refreshed[0])
+            except Exception:
+                readback_error = True
+
             actual = after.get("_value")
             verified = actual is not None and str(actual) == requested
             evidence = {
@@ -514,6 +522,7 @@ def windows_ui_automation(
                 "before": _public_state(before),
                 "after": _public_state(after),
                 "expected_length": len(requested),
+                "readback_error": readback_error,
             }
             return _result(
                 action,
