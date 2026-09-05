@@ -4,18 +4,18 @@
 
 **Última atualização:** 2026-09-05
 **Branch canónica:** `main`
-**Main confirmado:** `2952eb9c26f4c04b8dbd6e945daf2395eebe6107`
+**Main confirmado:** `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`
 
 ## Estado atual
 
 | Campo | Estado |
 |---|---|
-| Tarefa ativa | ANT-251 — Local Command Fast Path |
-| Branch ativa | `codex/reliability-priority-wave1` |
-| Pull requests abertas | Nenhuma no início desta slice; abrir apenas esta implementação quando reviewable |
+| Tarefa ativa | ANT-253 — Verifier central |
+| Branch ativa | `codex/execution-verifier-core` |
+| Pull requests abertas | abrir apenas esta implementação quando reviewable |
 | Issues abertas | Nenhuma necessária para este trabalho |
 | Próximo teste real | Windows: fast path + browser real + rato + multi-monitor + ScreenConnect |
-| Próxima tarefa | ANT-252/253 — `ExecutionResult` + Verifier central |
+| Próxima tarefa | ANT-254/255 — postconditions de apps/janelas e input desktop |
 
 ## Prioridade aprovada em 2026-09-05
 
@@ -39,71 +39,70 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 - PR #12: nova UI Antonella + voz feminina.
 - PR #13: visão multi-monitor e identidade da sessão de visão.
 - PR #14–#22: Computer Use económico, especialista OpenAI, seleção de ecrãs, HUD, preferências, batching, painel do agente, captura por janela e controlo verificável de abas/rato.
-- PR #23: runtime-readiness; README/setup apontam para `antonella.py`, doctor alinhado ao Gemini Live, probes isolados de GUI/áudio e diagnóstico de Chromium. CI verde em Python 3.11, Python 3.12 e dependency lock antes do merge. Merge: `2952eb9c26f4c04b8dbd6e945daf2395eebe6107`.
+- PR #23: runtime-readiness; merge `2952eb9c26f4c04b8dbd6e945daf2395eebe6107`; CI verde em Python 3.11/3.12 e lock.
+- PR #24: Reliability Hardening Wave 1; merge `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`; ANT-251 Local Fast Path integrado e ANT-252 `ExecutionResult` canónico integrado. CI verde em Python 3.11/3.12 e lock.
 
-## Trabalho em curso — ANT-251 Local Command Fast Path
+## ANT-251 — concluído e integrado
 
-A branch `codex/local-command-fast-path` histórica estava 6 commits à frente e 2 atrás da `main`, baseada em `e24e6e7`. Para evitar integrar uma branch divergente, o trabalho útil está a ser portado de forma limpa para `codex/reliability-priority-wave1`, baseada na `main` atual.
-
-Escopo desta slice:
-
-- reconhecer apenas comandos simples/inequívocos de baixo risco;
-- executar localmente sem novo turno Gemini/OpenAI;
-- manter pedidos multi-etapa no cérebro principal;
-- comandos iniciais: abrir app, scroll, listar ecrãs, status/parar/aprovar agente, status do sistema, modo de custo e preferência de provider;
+- comandos simples/inequívocos podem ser resolvidos localmente sem novo turno LLM;
+- pedidos multi-etapa continuam para o cérebro principal;
 - router local não importa SDK Gemini/OpenAI;
-- testes de regressão garantem que pedidos complexos não são interceptados.
+- `open_app`/`scroll` legados não são promovidos a sucesso verificado apenas pelo texto de retorno;
+- branch antiga `codex/local-command-fast-path` foi alinhada à `main` depois de o trabalho útil ser portado/supersedido.
+
+## ANT-252 — concluído e integrado
+
+`core/execution_result.py` define o contrato canónico com:
+
+- `ok`;
+- `delivered`;
+- `verified`;
+- `evidence`;
+- `error`;
+- `risk`;
+- `requires_approval`;
+- `correlation_id`;
+- `can_claim_success`.
+
+`ok=true` ou ausência de exception não implicam `verified=true`.
+
+## ANT-253 — em implementação
+
+A branch `codex/execution-verifier-core` introduz:
+
+- `core/verifier.py` para converter resultados estruturados/legados sem inventar postconditions;
+- `core/tool_verification_policy.py` para identificar tools/actions que exigem evidência antes de claim de sucesso;
+- integração no `AntonellaLive._execute_tool`: respostas side-effecting recebem um objecto `execution` autoritativo antes de voltar ao modelo;
+- prompt actualizado: `execution.can_claim_success=true` é a condição runtime para anunciar conclusão;
+- strings legadas `Done`, `Opened`, `Scrolled`, etc. permanecem `verified=false` até um verifier específico provar o efeito;
+- testes fail-closed para structured JSON, erros inconsistentes, aprovação e tools mutantes.
+
+Esta slice ainda não substitui os verifiers específicos de cada domínio. ANT-254–258 continuam necessários para transformar entrega não verificada em sucesso comprovado quando tecnicamente possível.
 
 ## Implementação integrada — Realtime Computer Use económico (E2E pendente)
 
-### Perceção contínua local
-
-- stream desktop em background;
-- 10/15/20 FPS conforme modo de custo;
-- seleção automática ou explícita de monitor;
-- coordenadas negativas;
-- `frame diff` local;
-- target-window ROI com fallback para monitor;
-- compressão diferente por tier.
-
-### Loop
-
-```text
-observe → plan → safety → act → observe → verify/change → continue
-```
-
-O loop corre em background para a conversa de voz continuar disponível.
-
-### Controlo de custo
-
-- `economy` default;
-- limites de chamadas/passos;
-- resolução menor em economy;
-- OpenAI por tier quando configurado;
-- fallback Gemini;
-- micro-batching conservador e `saved_model_calls`.
-
-### Segurança atual
-
-- baixo risco automático dentro do Computer Use;
-- efeitos destrutivos, externos, privilegiados, financeiros ou permissões pausam;
-- aprovação de uso único;
-- `stop` interrompe inclusive espera de aprovação;
-- este gate ainda não cobre universalmente todas as tools legadas — ANT-261/262 continuam prioritárias.
+- stream desktop em background com tiers 10/15/20 FPS locais;
+- monitor automático/explícito e coordenadas negativas;
+- frame diff local;
+- target-window ROI;
+- economy default, budgets, OpenAI opcional/fallback Gemini;
+- micro-batching conservador;
+- approvals de uso único dentro do Computer Use;
+- stop durante execução/espera de aprovação.
 
 ## Validações e limites conhecidos
 
-- O utilizador já confirmou smoke anterior de UI/voz/Notepad, mas as novas slices de browser/rato/Computer Use precisam de novo E2E Windows após atualização da `main`.
+- O utilizador confirmou smoke anterior de UI/voz/Notepad, mas as novas slices precisam de novo E2E Windows após actualizar a `main`.
 - Unit tests/CI Linux não provam Win32, UIA, áudio físico, DPI, multi-monitor ou ScreenConnect.
-- O browser real e o rato agora possuem controlos verificáveis para os casos corrigidos, mas a verificação ainda precisa ser generalizada às restantes tools.
-- O código herdado ainda concentra responsabilidades em `main.py`; a extração será incremental, não big-bang.
+- Browser real e rato possuem verificação específica nos casos da PR #22; restantes tools estão agora a entrar no contrato universal.
+- O código herdado ainda concentra responsabilidades em `main.py`; a extração será incremental.
 
 ## Próxima sequência
 
-1. concluir ANT-251 e integrar apenas com CI verde;
-2. ANT-252/253 `ExecutionResult` + Verifier;
-3. aplicar o contrato às tools legadas começando pelas que causam efeitos no desktop;
-4. browser real + DPI/multi-monitor hardening;
+1. concluir ANT-253 e integrar apenas com CI verde;
+2. ANT-254/255: postconditions de app/window e mouse/keyboard/click/scroll/type;
+3. ANT-256/257: browser real e multi-monitor/DPI hardening;
+4. ANT-258: UIA/files/settings;
 5. AgentOrchestrator/Policy Engine;
-6. continuar custo/UI/observabilidade;
+6. custo/UI/observabilidade;
 7. memória Supabase/skills depois do core confiável.
