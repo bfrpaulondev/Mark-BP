@@ -15,6 +15,8 @@ class RealtimeComputerUseSession:
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._approval_event = threading.Event()
+        self._resume_event = threading.Event()
+        self._resume_event.set()
         self._thread: threading.Thread | None = None
         self._state = SessionState()
         self._player = None
@@ -51,6 +53,7 @@ class RealtimeComputerUseSession:
             self._player = player
             self._stop_event.clear()
             self._approval_event.clear()
+            self._resume_event.set()
             self._state = SessionState(
                 state="starting",
                 objective=objective,
@@ -81,10 +84,52 @@ class RealtimeComputerUseSession:
     def stop(self) -> dict[str, Any]:
         self._stop_event.set()
         self._approval_event.set()
+        self._resume_event.set()
         self._log("Computer Use · stop requested")
         with self._lock:
             if self._state.state not in {"idle", "done", "failed", "stopped"}:
                 self._state.state = "stopping"
+                self._state.paused = False
+        return {"ok": True, "status": self.status()}
+
+    def pause(self) -> dict[str, Any]:
+        with self._lock:
+            if not self._thread or not self._thread.is_alive():
+                return {
+                    "ok": False,
+                    "error": "No active Computer Use session can be paused.",
+                    "status": self._state.as_dict(),
+                }
+            if self._state.state in {"done", "failed", "stopped", "stopping"}:
+                return {
+                    "ok": False,
+                    "error": "Computer Use is already finishing or finished.",
+                    "status": self._state.as_dict(),
+                }
+            if self._state.paused:
+                return {"ok": True, "status": self._state.as_dict()}
+            self._state.paused = True
+            self._state.state = "paused"
+            self._resume_event.clear()
+        self._log("Computer Use · paused by user")
+        return {"ok": True, "status": self.status()}
+
+    def resume(self) -> dict[str, Any]:
+        with self._lock:
+            if not self._thread or not self._thread.is_alive():
+                return {
+                    "ok": False,
+                    "error": "No active Computer Use session can be resumed.",
+                    "status": self._state.as_dict(),
+                }
+            if not self._state.paused:
+                return {"ok": True, "status": self._state.as_dict()}
+            self._state.paused = False
+            self._state.state = (
+                "awaiting_approval" if self._state.awaiting_approval else "observing"
+            )
+            self._resume_event.set()
+        self._log("Computer Use · resumed by user")
         return {"ok": True, "status": self.status()}
 
     def approve_once(self) -> dict[str, Any]:
@@ -96,7 +141,8 @@ class RealtimeComputerUseSession:
                     "status": self._state.as_dict(),
                 }
             self._state.awaiting_approval = False
-            self._state.state = "executing"
+            if not self._state.paused:
+                self._state.state = "executing"
         self._approval_event.set()
         self._log("Computer Use · one high-risk step approved")
         return {"ok": True, "status": self.status()}
@@ -112,6 +158,12 @@ class RealtimeComputerUseSession:
             from core.computer_use.actuator import execute_action
             from core.computer_use.capture import RealtimeDesktopCapture
             from core.computer_use.planner import ComputerUsePlanner
+            from core.computer_use.recovery import (
+                RecoveryPolicy,
+                RecoveryState,
+                frame_is_superseded,
+                target_scope_is_valid,
+            )
             from core.computer_use.safety import evaluate_action
 
             planner = ComputerUsePlanner(
@@ -124,6 +176,9 @@ class RealtimeComputerUseSession:
             if max_steps_override is not None:
                 max_steps = max(1, min(max_steps, int(max_steps_override)))
 
+            recovery_policy = RecoveryPolicy.for_step_budget(max_steps)
+            recovery = RecoveryState()
+
             with self._lock:
                 self._state.provider = planner.last_provider
                 self._state.model = planner.last_model
@@ -133,16 +188,8 @@ class RealtimeComputerUseSession:
             last_logged_model = planner.last_model
 
             if self._state.target_window:
-                from actions.computer_control import computer_control
-
-                computer_control(
-                    parameters={
-                        "action": "focus_window",
-                        "title": self._state.target_window,
-                    },
-                    player=self._player,
-                )
-                time.sleep(0.4)
+                self._focus_target_window()
+                time.sleep(0.35)
 
             capture = RealtimeDesktopCapture(
                 fps=budget.capture_fps,
@@ -156,12 +203,25 @@ class RealtimeComputerUseSession:
             capture.start()
             frame = capture.latest(timeout=4.0)
 
-            with self._lock:
-                self._state.state = "observing"
-                self._state.monitor_index = frame.monitor_index
-                self._state.visual_updates = frame.sequence
-                self._state.capture_scope = frame.capture_scope
-                self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+            if self._state.target_window and not target_scope_is_valid(
+                frame, self._state.target_window
+            ):
+                recovered = self._recover_target_window(
+                    capture,
+                    recovery,
+                    recovery_policy,
+                    reason="target window was not available at session start",
+                )
+                if recovered is None:
+                    self._finish(
+                        "failed",
+                        error="The requested target window could not be acquired safely.",
+                    )
+                    return
+                frame = recovered
+
+            self._set_frame_state(frame, state="observing")
+            self._apply_recovery_state(recovery)
             self._apply_perception_stats(capture)
 
             requested = self._state.requested_monitor
@@ -179,13 +239,45 @@ class RealtimeComputerUseSession:
             )
 
             history: list[str] = []
-            no_change_count = 0
             step = 1
 
             while step <= max_steps:
-                if self._stop_event.is_set():
+                if not self._wait_until_resumed():
                     self._finish("stopped", result="Computer Use stopped by user.")
                     return
+
+                if self._state.target_window and not target_scope_is_valid(
+                    frame, self._state.target_window
+                ):
+                    if not recovery.can_recover(recovery_policy):
+                        self._finish(
+                            "failed",
+                            error="Computer Use exhausted its bounded target-window recovery budget.",
+                        )
+                        return
+                    recovered = self._recover_target_window(
+                        capture,
+                        recovery,
+                        recovery_policy,
+                        reason="target window capture scope was lost",
+                    )
+                    self._apply_recovery_state(recovery)
+                    if recovered is None:
+                        if not recovery.can_recover(recovery_policy):
+                            self._finish(
+                                "failed",
+                                error="The requested target window could not be reacquired safely.",
+                            )
+                            return
+                        time.sleep(0.15)
+                        try:
+                            frame = capture.latest(timeout=0.5)
+                        except Exception:
+                            pass
+                        continue
+                    frame = recovered
+                    history.append("Target window reacquired; visual plan will be recomputed.")
+                    history = history[-12:]
 
                 with self._lock:
                     self._state.state = "planning"
@@ -193,6 +285,9 @@ class RealtimeComputerUseSession:
                     self._state.monitor_index = frame.monitor_index
                     self._state.capture_scope = frame.capture_scope
                     self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+                    self._state.target_locked = bool(
+                        self._state.target_window and frame.capture_scope == "window"
+                    )
 
                 actions = planner.next_actions(
                     objective=self._state.objective,
@@ -202,8 +297,6 @@ class RealtimeComputerUseSession:
                 )
 
                 with self._lock:
-                    # Count actual provider requests, including fallback, instead
-                    # of reporting only logical planning turns.
                     self._state.model_calls = planner.provider_attempts
                     self._state.saved_model_calls = planner.saved_model_calls
                     self._state.local_perception_routes = planner.local_perception_routes
@@ -229,6 +322,8 @@ class RealtimeComputerUseSession:
                     last_logged_provider = planner.last_provider
                     last_logged_model = planner.last_model
 
+                replan_requested = False
+
                 for batch_index, action in enumerate(actions):
                     if step > max_steps:
                         self._finish(
@@ -237,9 +332,43 @@ class RealtimeComputerUseSession:
                         )
                         return
 
-                    if self._stop_event.is_set():
+                    if not self._wait_until_resumed():
                         self._finish("stopped", result="Computer Use stopped by user.")
                         return
+
+                    try:
+                        live_frame = capture.latest(timeout=0.08)
+                    except Exception:
+                        live_frame = frame
+
+                    if frame_is_superseded(frame, live_frame):
+                        if not recovery.can_recover(recovery_policy):
+                            self._finish(
+                                "failed",
+                                error="Computer Use exhausted its stale-plan recovery budget.",
+                            )
+                            return
+                        recovery.note_recovery(
+                            "desktop changed after planning; stale action discarded",
+                            kind="stale",
+                        )
+                        self._apply_recovery_state(recovery)
+                        history.append(
+                            "Desktop changed after planning; discarded stale visual action and replanned."
+                        )
+                        history = history[-12:]
+                        frame = live_frame
+                        self._set_frame_state(frame, state="recovering")
+                        self._log("Computer Use · stale visual plan discarded; replanning")
+                        replan_requested = True
+                        break
+
+                    if self._state.target_window and not target_scope_is_valid(
+                        live_frame, self._state.target_window
+                    ):
+                        frame = live_frame
+                        replan_requested = True
+                        break
 
                     with self._lock:
                         self._state.step = step
@@ -287,6 +416,9 @@ class RealtimeComputerUseSession:
                         if self._stop_event.is_set():
                             self._finish("stopped", result="Computer Use stopped by user.")
                             return
+                        if not self._wait_until_resumed():
+                            self._finish("stopped", result="Computer Use stopped by user.")
+                            return
 
                     with self._lock:
                         self._state.state = "executing"
@@ -321,48 +453,93 @@ class RealtimeComputerUseSession:
                             frame = capture.latest(timeout=0.35)
                         except Exception:
                             pass
-                        with self._lock:
-                            self._state.visual_updates = frame.sequence
-                            self._state.monitor_index = frame.monitor_index
-                            self._state.capture_scope = frame.capture_scope
-                            self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+                        self._set_frame_state(frame, state="observing")
                         self._apply_perception_stats(capture)
                         continue
 
                     if expects_visual_change:
+                        settle_timeout = recovery_policy.settle_timeout(
+                            action,
+                            recovery.no_change_streak,
+                        )
                         new_frame = capture.wait_for_change(
                             after_sequence=previous_sequence,
-                            timeout=2.5,
+                            timeout=settle_timeout,
                         )
-                        if new_frame.sequence == previous_sequence:
-                            no_change_count += 1
-                        else:
-                            no_change_count = 0
+                        changed = new_frame.sequence > previous_sequence
+                        recovery.note_visual_change(changed)
+
+                        if not changed and recovery.can_retry_action(
+                            action, recovery_policy
+                        ):
+                            if recovery.can_recover(recovery_policy):
+                                recovery.note_recovery(
+                                    "scroll produced no observable change; one safe retry",
+                                )
+                                recovery.note_action_retry(action)
+                                self._apply_recovery_state(recovery)
+                                self._set_frame_state(new_frame, state="recovering")
+                                self._log(
+                                    "Computer Use · scroll had no observable effect; retrying once"
+                                )
+                                retry_sequence = new_frame.sequence
+                                retry_result, _ = execute_action(
+                                    action,
+                                    new_frame,
+                                    player=self._player,
+                                )
+                                history.append(
+                                    f"bounded scroll retry -> {retry_result[:140]}"
+                                )
+                                history = history[-12:]
+                                retried_frame = capture.wait_for_change(
+                                    after_sequence=retry_sequence,
+                                    timeout=recovery_policy.settle_timeout(
+                                        action,
+                                        recovery.no_change_streak,
+                                    ),
+                                )
+                                retry_changed = retried_frame.sequence > retry_sequence
+                                recovery.note_visual_change(retry_changed)
+                                new_frame = retried_frame
+                                changed = retry_changed
+
+                        if changed:
                             time.sleep(0.08)
                             try:
-                                new_frame = capture.latest(timeout=0.5)
+                                new_frame = capture.latest(timeout=0.45)
                             except Exception:
                                 pass
+                        else:
+                            if not recovery.can_recover(recovery_policy):
+                                self._apply_recovery_state(recovery)
+                                self._finish(
+                                    "failed",
+                                    error="Computer Use exhausted its bounded visual recovery budget.",
+                                )
+                                return
+                            recovery.note_recovery(
+                                "visual action produced no observable screen change",
+                            )
+                            history.append(
+                                "Visual action produced no observable change; planner must re-evaluate instead of assuming success."
+                            )
+                            history = history[-12:]
+                            self._log(
+                                "Computer Use · no observable visual effect; replanning"
+                            )
                         frame = new_frame
                     else:
                         time.sleep(min(1.0, action.seconds))
                         frame = capture.latest(timeout=1.0)
 
-                    with self._lock:
-                        self._state.state = "observing"
-                        self._state.monitor_index = frame.monitor_index
-                        self._state.visual_updates = frame.sequence
-                        self._state.capture_scope = frame.capture_scope
-                        self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+                    self._apply_recovery_state(recovery)
+                    self._set_frame_state(frame, state="observing")
                     self._apply_perception_stats(capture)
-
-                    if no_change_count >= 3:
-                        history.append(
-                            "Three consecutive visual actions produced no meaningful screen change."
-                        )
-                        no_change_count = 0
-
                     break
+
+                if replan_requested:
+                    continue
 
             self._finish(
                 "failed",
@@ -387,6 +564,94 @@ class RealtimeComputerUseSession:
                     capture.stop()
                 except Exception:
                     pass
+
+    def _wait_until_resumed(self) -> bool:
+        while not self._stop_event.is_set():
+            if self._resume_event.wait(timeout=0.2):
+                return True
+        return False
+
+    def _focus_target_window(self) -> str:
+        title = str(self._state.target_window or "").strip()
+        if not title:
+            return ""
+        try:
+            from actions.computer_control import computer_control
+
+            return str(
+                computer_control(
+                    parameters={"action": "focus_window", "title": title},
+                    player=self._player,
+                )
+                or ""
+            )
+        except Exception as exc:
+            return f"focus_window failed: {exc}"
+
+    def _recover_target_window(
+        self,
+        capture: Any,
+        recovery: Any,
+        recovery_policy: Any,
+        *,
+        reason: str,
+    ) -> Any | None:
+        if not recovery.can_recover(recovery_policy):
+            return None
+
+        recovery.note_recovery(reason, kind="reacquire")
+        self._apply_recovery_state(recovery)
+        with self._lock:
+            self._state.state = "recovering"
+            self._state.target_locked = False
+        self._log("Computer Use · target window lost; attempting bounded reacquisition")
+
+        focus_result = self._focus_target_window()
+        if "failed" in focus_result.casefold():
+            return None
+
+        deadline = time.monotonic() + recovery_policy.reacquire_timeout
+        while not self._stop_event.is_set() and time.monotonic() < deadline:
+            if not self._wait_until_resumed():
+                return None
+            try:
+                candidate = capture.latest(timeout=0.25)
+            except Exception:
+                time.sleep(0.08)
+                continue
+            if candidate.capture_scope == "window":
+                with self._lock:
+                    self._state.target_locked = True
+                self._log("Computer Use · target window reacquired")
+                return candidate
+            time.sleep(0.08)
+        return None
+
+    def _set_frame_state(self, frame: Any, *, state: str) -> None:
+        with self._lock:
+            self._state.state = state
+            self._state.monitor_index = frame.monitor_index
+            self._state.visual_updates = frame.sequence
+            self._state.capture_scope = frame.capture_scope
+            self._state.capture_savings_pct = int(round(frame.pixel_savings * 100))
+            self._state.target_locked = bool(
+                self._state.target_window and frame.capture_scope == "window"
+            )
+
+    def _apply_recovery_state(self, recovery: Any) -> None:
+        try:
+            snapshot = recovery.snapshot()
+        except Exception:
+            return
+        with self._lock:
+            self._state.recovery_count = int(snapshot.get("recoveries") or 0)
+            self._state.retry_count = int(snapshot.get("safe_action_retries") or 0)
+            self._state.no_change_streak = int(snapshot.get("no_change_streak") or 0)
+            self._state.stale_replans = int(snapshot.get("stale_replans") or 0)
+            self._state.target_reacquisitions = int(
+                snapshot.get("target_reacquisitions") or 0
+            )
+            self._state.last_recovery_reason = str(snapshot.get("last_reason") or "")
 
     def _apply_cost_snapshot(self, snapshot: dict[str, Any] | None) -> None:
         if not isinstance(snapshot, dict):
@@ -428,10 +693,12 @@ class RealtimeComputerUseSession:
         with self._lock:
             self._state.state = state
             self._state.awaiting_approval = False
+            self._state.paused = False
             if result:
                 self._state.result = result
             if error:
                 self._state.last_error = error
+        self._resume_event.set()
 
     def _log(self, message: str) -> None:
         player = self._player
