@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -8,7 +7,9 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
+from core.execution_engine import ExecutionEngine
 from core.execution_result import ExecutionResult
+from core.tool_router import ToolRouter
 
 
 class AgentStage(str, Enum):
@@ -51,6 +52,7 @@ class ToolOrchestrationOutcome:
     execution: ExecutionResult | None
     events: tuple[OrchestrationEvent, ...]
     duration_ms: int
+    route_tier: str = "legacy"
 
     @property
     def can_claim_success(self) -> bool:
@@ -82,11 +84,15 @@ class AgentOrchestrator:
         capture_postcondition_state: Callable[[str, Mapping[str, Any] | None], Mapping[str, Any]],
         verify_postcondition: Callable[..., ExecutionResult],
         event_sink: Callable[[OrchestrationEvent], Any] | None = None,
+        tool_router: ToolRouter | None = None,
+        execution_engine: ExecutionEngine | None = None,
     ) -> None:
         self._requires_postcondition = requires_postcondition
         self._capture_postcondition_state = capture_postcondition_state
         self._verify_postcondition = verify_postcondition
         self._event_sink = event_sink
+        self._tool_router = tool_router or ToolRouter()
+        self._execution_engine = execution_engine or ExecutionEngine()
 
     # -.-.-.-
     async def run_tool(
@@ -101,14 +107,19 @@ class AgentOrchestrator:
         correlation_id = uuid.uuid4().hex[:16]
         started = time.monotonic()
         events: list[OrchestrationEvent] = []
+        route = self._tool_router.route(name, params)
 
         self._emit(
             events,
             correlation_id,
             AgentStage.ROUTE,
             name,
-            detail="legacy_tool_route",
-            metadata={"argument_names": sorted(str(key) for key in params)},
+            detail="deterministic_tool_route",
+            metadata={
+                "argument_names": sorted(str(key) for key in params),
+                "route_tier": route.tier.value,
+                "route_reason": route.reason,
+            },
         )
 
         # ANT-261 will replace this explicit boundary with the central Policy Engine.
@@ -140,14 +151,16 @@ class AgentOrchestrator:
             correlation_id,
             AgentStage.EXECUTE,
             name,
-            detail="dispatch_existing_runtime_tool",
-            metadata={"requires_postcondition": needs_postcondition},
+            detail="dispatch_execution_engine",
+            metadata={
+                "requires_postcondition": needs_postcondition,
+                "route_tier": route.tier.value,
+            },
         )
 
         try:
-            raw_response = executor()
-            if inspect.isawaitable(raw_response):
-                raw_response = await raw_response
+            dispatch = await self._execution_engine.execute(route, executor)
+            raw_response = dispatch.raw_response
         except Exception as exc:
             self._emit(
                 events,
@@ -214,6 +227,7 @@ class AgentOrchestrator:
             execution=execution,
             events=tuple(events),
             duration_ms=duration_ms,
+            route_tier=route.tier.value,
         )
 
     # -.-.-.-
