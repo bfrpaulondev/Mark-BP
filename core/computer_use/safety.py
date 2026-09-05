@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from core.computer_use.contracts import ComputerAction
@@ -57,6 +58,72 @@ _APPROVAL_PHRASES = {
     "confirm changes",
 }
 
+_LOCAL_CONTEXT_APPROVAL_TERMS = {
+    "delete",
+    "remove",
+    "erase",
+    "send",
+    "submit",
+    "publish",
+    "upload",
+    "download",
+    "buy",
+    "purchase",
+    "pay",
+    "transfer",
+    "confirm",
+    "approve",
+    "save",
+    "apply",
+    "accept",
+    "allow",
+    "install",
+    "uninstall",
+    "login",
+    "signin",
+    "run",
+    "execute",
+    "shutdown",
+    "restart",
+    "apagar",
+    "eliminar",
+    "remover",
+    "enviar",
+    "submeter",
+    "publicar",
+    "carregar",
+    "descarregar",
+    "comprar",
+    "pagar",
+    "transferir",
+    "confirmar",
+    "aprovar",
+    "guardar",
+    "aplicar",
+    "aceitar",
+    "permitir",
+    "instalar",
+    "desinstalar",
+    "entrar",
+    "executar",
+    "desligar",
+    "reiniciar",
+}
+_LOCAL_CONTEXT_APPROVAL_PHRASES = {
+    "sign in",
+    "log in",
+    "place order",
+    "grant access",
+    "revoke access",
+    "save changes",
+    "confirm changes",
+    "alterar permissões",
+    "conceder acesso",
+    "revogar acesso",
+    "guardar alterações",
+    "confirmar alterações",
+}
+
 
 # -.-.-.-
 def evaluate_action(action: ComputerAction) -> SafetyDecision:
@@ -68,6 +135,7 @@ def evaluate_action(action: ComputerAction) -> SafetyDecision:
             action.text,
             action.keys,
             action.result,
+            action.safety_context,
         )
         if part
     ).lower()
@@ -92,5 +160,20 @@ def evaluate_action(action: ComputerAction) -> SafetyDecision:
             requires_approval=True,
             reason="This step may create a destructive, external, privileged or financial effect.",
         )
+
+    local_context = str(action.safety_context or "").strip().casefold()
+    if local_context:
+        local_tokens = set(
+            re.findall(r"[\wÀ-ÿ]+", local_context, flags=re.UNICODE)
+        )
+        if (
+            any(phrase in local_context for phrase in _LOCAL_CONTEXT_APPROVAL_PHRASES)
+            or bool(local_tokens & _LOCAL_CONTEXT_APPROVAL_TERMS)
+        ):
+            return SafetyDecision(
+                allowed=False,
+                requires_approval=True,
+                reason="The local UI target may create an external, privileged or irreversible effect.",
+            )
 
     return SafetyDecision(allowed=True, requires_approval=False)

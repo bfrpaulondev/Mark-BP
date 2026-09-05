@@ -38,16 +38,16 @@ quando não pode → informa claramente sem inventar sucesso
 
 ## P1 — custo, percepção e Computer Use
 
-- [ ] **ANT-264 — Telemetria de custo por tarefa.** PR #43 em review: usage provider-neutral, latência/retry/fallback, calls saved/cache hits, registry bounded/content-free e custo somente com pricing explícito configurado. Não marcar concluído até integração e CI final.
-- [ ] **ANT-265 — Cache e percepção local.** Frame/keyframe cache, OpenCV/UIA-first e chamadas VLM somente quando acrescentam semântica necessária.
+- [x] **ANT-264 — Telemetria de custo por tarefa.** PR #43 integrada em `main`: usage provider-neutral, latência/retry/fallback, calls saved/cache hits, registry bounded/content-free e custo somente com pricing explícito configurado. Billing real do provider permanece fonte de verdade financeira.
+- [x] **ANT-265 — Cache e percepção local.** PR #45 integrada em `main` após principal review e CI Linux/Windows 3.11/3.12: frame/keyframe cache bounded/content-free, exact-digest classification, UIA-first apenas para primeiro click explícito/único/baixo risco, telemetria de chamadas poupadas e `safety_context` transitório que não entra em histórico/telemetria. E2E físico continua no ANT-275.
 - [ ] **ANT-266 — Hardening ScreenConnect.** Target-window locking/reacquisition, settle adaptativo, scroll verificável, recuperação, pause/resume/cancel e frames efémeros por default.
 - [ ] **ANT-267 — Melhorar Computer Use recovery.** Replanning quando UI muda, state tracking, bounded retries e evidência de conclusão.
 
 ## P1 — UI/UX e voz das áreas prontas
 
 - [x] **ANT-268 — Estados operacionais explícitos na UI.** PR #37 integrada após principal review; estados desconhecidos permanecem conservadores em vez de aparecerem como PRONTA.
-- [ ] **ANT-269 — Evoluir Agent Control Center.** PR #42 do GLM em principal review; progresso/timeline/evidência/custo/janela alvo e Stop/Approve contextuais sem inventar percentagens/custo.
-- [ ] **ANT-270 — Hardening UI Windows.** DPI/responsividade, keyboard accessibility, empty/error states, microtransições, visual regression e performance.
+- [x] **ANT-269 — Evoluir Agent Control Center.** PR #42 integrada após principal review/correcções: progresso/timeline/evidência/janela alvo, custo ANT-264 e Stop/Approve contextuais sem inventar percentagens/custo.
+- [ ] **ANT-270 — Hardening UI Windows.** PR #44 voltou a Draft após principal review: precisa ser reconciliada com `main`, corrigir erro de runtime no painel e provar por teste Qt comportamental que Enter/Return não concede aprovação. DPI/responsividade, accessibility, visual regression e performance continuam nesta linha.
 - [ ] **ANT-271 — Sincronizar voz com verificação.** Nunca falar sucesso antes do verifier; melhorar barge-in, cancelamento, silêncio/end-of-turn e progresso falado conciso.
 - [ ] **ANT-272 — Limpar identidade herdada.** Remover gradualmente resíduos JARVIS/Mark visíveis ou internos onde não sejam necessários para compatibilidade.
 

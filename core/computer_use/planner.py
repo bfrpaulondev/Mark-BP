@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from core.computer_use.batching import MAX_ACTIONS_PER_PLAN, sanitize_action_batch
 from core.computer_use.contracts import ComputerAction, FrameSnapshot
+from core.computer_use.local_perception import LocalPerceptionPlanner
 from core.cost_router import ModelRoute, normalize_cost_mode, select_visual_route
 from core.cost_telemetry import get_cost_telemetry
 from core.provider_router import ProviderExhaustedError, ProviderRole, ProviderRouter
@@ -34,9 +35,11 @@ class ComputerUsePlanner:
         *,
         cost_mode: str = "economy",
         telemetry_task_id: str | None = None,
+        target_window: str = "",
     ):
         self._config = dict(config)
         self._cost_mode = normalize_cost_mode(cost_mode)
+        self._target_window = str(target_window or "").strip()
         self.route: ModelRoute = select_visual_route(
             self._config,
             cost_mode=self._cost_mode,
@@ -48,17 +51,27 @@ class ComputerUsePlanner:
             self._config,
             max_attempts_per_provider=1,
         )
+        self._local_perception = LocalPerceptionPlanner(
+            enabled=_config_bool(
+                self._config.get("computer_use_local_perception_enabled"),
+                default=True,
+            )
+        )
         self._telemetry = get_cost_telemetry()
         self.telemetry_task_id = self._telemetry.start_task(
             telemetry_task_id,
             kind="computer_use",
         )
-        self.calls = 0  # logical planning turns (compatibility + budget)
+        self.calls = 0  # logical VLM planning turns (compatibility + budget)
         self.provider_attempts = 0  # actual provider requests, including fallback
         self.fallbacks = 0
+        self.saved_model_calls = 0
+        self.local_perception_routes = 0
+        self.perception_cache_hits = 0
         self.last_provider = self.route.provider
         self.last_model = self.route.model
         self.last_fallback_count = 0
+        self.last_plan_source = "none"
 
     def next_actions(
         self,
@@ -68,6 +81,26 @@ class ComputerUsePlanner:
         history: list[str],
         step: int,
     ) -> list[ComputerAction]:
+        # ANT-265 local semantic route: only the first, explicit, unique and
+        # low-risk click in a named target window may bypass the VLM. After an
+        # action has executed, recovery/replanning remains visual-model driven
+        # rather than repeating a cached local click on an unchanged frame.
+        if step == 1 and not history:
+            local = self._local_perception.suggest(
+                objective=objective,
+                frame=frame,
+                target_window=self._target_window,
+            )
+            if local is not None:
+                self.last_plan_source = local.source
+                self.local_perception_routes += 1
+                if local.cache_hit:
+                    self.perception_cache_hits += 1
+                self.record_saved_model_call(
+                    category="cache_hit" if local.cache_hit else "deterministic_route"
+                )
+                return [local.action]
+
         if self.calls >= self.route.budget.max_model_calls:
             return [
                 ComputerAction(
@@ -87,6 +120,7 @@ class ComputerUsePlanner:
             step=step,
         )
         self.calls += 1
+        self.last_plan_source = "vlm"
 
         try:
             result = self._provider_router.analyze_image(
@@ -132,11 +166,20 @@ class ComputerUsePlanner:
             step=step,
         )[0]
 
-    def record_saved_model_call(self, *, count: int = 1) -> None:
+    def record_saved_model_call(
+        self,
+        *,
+        count: int = 1,
+        category: str = "computer_use_batch",
+    ) -> None:
+        amount = max(0, min(10_000, int(count or 0)))
+        if amount <= 0:
+            return
+        self.saved_model_calls += amount
         self._telemetry.record_saved_call(
             self.telemetry_task_id,
-            category="computer_use_batch",
-            count=count,
+            category=category,
+            count=amount,
         )
 
     def telemetry_snapshot(self) -> dict[str, Any] | None:
@@ -164,6 +207,7 @@ def _build_prompt(
 ) -> str:
     recent_history = "\n".join(f"- {line}" for line in history[-8:]) or "- none"
     savings_pct = int(round(frame.pixel_savings * 100))
+    keyframe_text = "yes" if frame.perception_keyframe else "no"
     return f"""
 You are Antonella's visual desktop planner.
 
@@ -177,6 +221,7 @@ CURRENT FRAME:
 - capture scope: {frame.capture_scope}
 - source pixel reduction versus full monitor: {savings_pct}%
 - screen change score: {frame.change_score:.4f}
+- local keyframe: {keyframe_text}
 
 RECENT ACTIONS:
 {recent_history}
@@ -304,3 +349,17 @@ def _parse_actions(raw: str) -> list[ComputerAction]:
 def _parse_action(raw: str) -> ComputerAction:
     """Backward-compatible single-action parser used by older tests/callers."""
     return _parse_actions(raw)[0]
+
+
+# -.-.-.-
+def _config_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None or value == "":
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
