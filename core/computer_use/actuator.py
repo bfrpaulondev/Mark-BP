@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from core.computer_use.contracts import ComputerAction, FrameSnapshot
-from core.display_topology import current_topology_token
+from core.display_topology import current_topology_token, per_monitor_dpi_context
 
 
 _VISUAL_ACTIONS = {
@@ -83,5 +83,6 @@ def execute_action(
     else:
         return f"Unsupported Computer Use action: {action.action}", False
 
-    result = computer_control(parameters=params, player=player)
+    with per_monitor_dpi_context():
+        result = computer_control(parameters=params, player=player)
     return str(result or "Done."), action.action in _VISUAL_ACTIONS
