@@ -3,15 +3,13 @@
 Pure, deterministic, thread-safe helpers used by the live audio engine:
 
 - ``TurnRegistry`` (A3/V2): generation tokens for the playback queue —
-  when a turn is interrupted the token advances and any stale audio that
-  was already queued is rejected instead of played.
-- ``BargeInGate`` (V1/A4): energy-gated automatic barge-in. Mic frames
-  are analysed while the assistant speaks; the gate only fires after
-  ``frames_above`` consecutive loud frames and then enforces a cooldown
-  (speaker bleed protection). Disabled by default — opt-in via config.
-- ``VoiceLatency`` (V3/V5): bounded milestone tracker for the client-side
-  latencies that can actually be measured. Never stores speech content —
-  timestamps only.
+  when a turn is interrupted the token advances and stale queued audio is
+  rejected instead of played.
+- ``BargeInGate`` (V1/A4): energy-gated automatic barge-in. Disabled by
+  default and guarded by a lock because audio callbacks may arrive from a
+  native sound thread.
+- ``VoiceLatency`` (V3/V5): bounded client-side latency milestones that can
+  actually be measured. It never stores speech content — timestamps only.
 """
 
 from __future__ import annotations
@@ -46,11 +44,12 @@ class TurnRegistry:
 
 
 class BargeInGate:
-    """Energy-gated automatic barge-in (V1).
+    """Thread-safe energy-gated automatic barge-in (V1).
 
-    ``feed(rms, now)`` returns True exactly once per detection when the
-    gate is enabled and ``frames_above`` consecutive frames exceed the
-    threshold; a cooldown then suppresses further triggers.
+    ``feed(rms, now)`` returns True once per detection when the gate is
+    enabled and ``frames_above`` consecutive frames exceed the threshold;
+    a cooldown then suppresses further triggers. The state transition is
+    guarded because native audio callbacks are not an asyncio-owned surface.
     """
 
     def __init__(
@@ -65,6 +64,7 @@ class BargeInGate:
         self.threshold = max(0, int(threshold))
         self.frames_above = max(1, int(frames_above))
         self.cooldown_seconds = max(0.0, float(cooldown_seconds))
+        self._lock = threading.Lock()
         self._streak = 0
         self._last_trigger = float("-inf")
 
@@ -72,24 +72,28 @@ class BargeInGate:
     def feed(self, rms: float, now: float) -> bool:
         if not self.enabled:
             return False
-        if rms >= self.threshold:
-            self._streak += 1
-        else:
-            self._streak = 0
+        with self._lock:
+            if rms >= self.threshold:
+                self._streak += 1
+            else:
+                self._streak = 0
+                return False
+            if (
+                self._streak >= self.frames_above
+                and now - self._last_trigger >= self.cooldown_seconds
+            ):
+                self._streak = 0
+                self._last_trigger = now
+                return True
             return False
-        if self._streak >= self.frames_above and now - self._last_trigger >= self.cooldown_seconds:
-            self._streak = 0
-            self._last_trigger = now
-            return True
-        return False
 
 
 class VoiceLatency:
     """Bounded client-side latency milestones (V3/V5). Timestamps only.
 
-    Honest limitation: there is NO local VAD, so "last_user_audio" marks
-    the LAST CAPTURED MIC FRAME, not a proven end-of-speech. Server-side
-    VAD owns the real end-of-turn signal.
+    Honest limitation: there is NO trustworthy local VAD in this layer, so
+    ``last_user_audio`` is only the last captured mic frame. It must never be
+    presented as a proven end-of-speech timestamp.
     """
 
     MILESTONES = (
@@ -110,7 +114,7 @@ class VoiceLatency:
             raise ValueError(f"unknown latency milestone: {milestone}")
         value = now if now is not None else time.monotonic()
         with self._lock:
-            # "first_*" milestones keep their first value within a turn.
+            # First-occurrence milestones keep their first value in a turn.
             if milestone.startswith("first_") and milestone in self._marks:
                 return
             self._marks[milestone] = value
@@ -122,7 +126,7 @@ class VoiceLatency:
 
     # -.-.-.-
     def snapshot(self) -> dict[str, float | None]:
-        """Durations the client can honestly measure (V3)."""
+        """Return only client-side durations that this runtime can measure."""
         with self._lock:
             marks = dict(self._marks)
         last_user = marks.get("last_user_audio")
@@ -132,16 +136,21 @@ class VoiceLatency:
         first_audio = marks.get("first_response_audio")
 
         def delta(a: float | None, b: float | None) -> float | None:
-            return None if a is None or b is None else round(b - a, 3)
+            if a is None or b is None:
+                return None
+            value = b - a
+            # A negative delta means the milestones did not describe the
+            # causal order assumed by the metric; report it as unavailable.
+            return None if value < 0 else round(value, 3)
 
-        # V5: without local VAD there is NO proven end-of-speech — the
-        # mic-frame milestone is the LAST CAPTURED FRAME, not the end of
-        # speech. Name it accordingly and never report it as
-        # "after end of speech".
         return {
             "transcription_latency_ms": _ms(delta(last_user, transcription)),
             "route_to_agent_ms": _ms(delta(transcription, agent)),
             "agent_to_first_action_ms": _ms(delta(agent, first_action)),
+            "input_transcription_to_first_audio_ms": _ms(
+                delta(transcription, first_audio)
+            ),
+            # Diagnostic only. This is NOT end-of-speech latency.
             "last_mic_frame_to_first_audio_ms": _ms(delta(last_user, first_audio)),
         }
 
@@ -155,5 +164,8 @@ def percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
     ordered = sorted(values)
-    index = min(len(ordered) - 1, max(0, round((pct / 100.0) * (len(ordered) - 1))))
+    index = min(
+        len(ordered) - 1,
+        max(0, round((pct / 100.0) * (len(ordered) - 1))),
+    )
     return ordered[index]
