@@ -1,0 +1,9 @@
+name: Workday Summary
+slug: workday-summary
+version: 0.1.0
+description: Resume reuniões, trabalho, decisões e bloqueios do dia a partir dos dados fornecidos.
+entrypoint: skill:run
+permissions: []
+risk: low
+timeout_seconds: 30
+author: glm

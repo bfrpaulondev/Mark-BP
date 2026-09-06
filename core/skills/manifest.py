@@ -138,7 +138,11 @@ def validate_manifest(manifest: SkillManifest) -> list[str]:
     """E2/E7: structural validation. Returns a list of problems (empty = valid)."""
     problems: list[str] = []
     for field_name in REQUIRED_FIELDS:
-        if not getattr(manifest, field_name if field_name != "timeout_seconds" else "timeout_seconds"):
+        # permissions: an EMPTY set is valid and the most conservative case
+        # for pure skills — only unknown permissions are flagged below.
+        if field_name == "permissions":
+            continue
+        if not getattr(manifest, field_name):
             problems.append(f"missing required field: {field_name}")
     if not _SLUG_RE.match(manifest.slug):
         problems.append("slug must be lowercase kebab-case")
