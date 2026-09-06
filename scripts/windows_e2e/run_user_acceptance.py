@@ -146,7 +146,29 @@ def _stop_launched(process: subprocess.Popen | None) -> None:
 def run_interactive() -> list[dict]:
     records: list[dict] = []
     print("\n=== VALIDAÇÃO INTERACTIVA (o teu veredicto é o resultado) ===")
+    barge_in_passed = False
     for index, step in enumerate(INTERACTIVE_STEPS, start=1):
+        # PRIOR. 4 honesty: a manual stop is NOT an automatic barge-in
+        # proof. The post-interrupt command is only validated after the
+        # barge-in step actually PASSes; otherwise it is recorded as
+        # SKIPPED with an explicit reason.
+        if step["id"] == "second-command-after-interrupt" and not barge_in_passed:
+            records.append(
+                {
+                    "case_id": step["id"],
+                    "status": "SKIPPED",
+                    "reason": (
+                        "automatic barge-in did not pass; "
+                        "post-interrupt scenario not validated"
+                    ),
+                    "timestamp": time.time(),
+                }
+            )
+            print(
+                "\n[VOICE 4/4] SKIPPED — o barge-in automático não passou; "
+                "o cenário pós-interrupção não é validado."
+            )
+            continue
         print(f"\n{step['title']}")
         print(f"  Instrução: {step['instruction']}")
         print(f"  Critério:  {step['pass_criteria']}")
@@ -154,6 +176,8 @@ def run_interactive() -> list[dict]:
             "  Resultado?",
             skippable=bool(step.get("skippable")),
         )
+        if step["id"] == "barge-in":
+            barge_in_passed = status == "PASS"
         row = {
             "case_id": step["id"],
             "status": status,

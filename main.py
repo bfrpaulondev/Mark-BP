@@ -42,7 +42,7 @@ from pathlib import Path
 import sounddevice as sd
 from google import genai
 from google.genai import types
-from config import get_gemini_key
+from config import get_config, get_gemini_key
 from ui import AntonellaUI
 from core.voice_runtime import BargeInGate, TurnRegistry, VoiceLatency
 from memory.memory_manager import (
@@ -582,11 +582,14 @@ class AntonellaRuntime:
         _cfg = get_config()
         self._voice_fast_path_enabled = False  # V4: off until model-turn suppression is safe
         self._voice_fast_path_candidates = 0
+        from core.voice_runtime import BargeInSettings
+
+        _barge_settings          = BargeInSettings.from_config(get_config())
         self._barge_gate          = BargeInGate(
-            enabled=bool(_cfg.get("barge_in_enabled") or False),
-            threshold=int(_cfg.get("barge_in_threshold") or 900),
-            frames_above=int(_cfg.get("barge_in_frames") or 3),
-            cooldown_seconds=float(_cfg.get("barge_in_cooldown") or 2.0),
+            enabled=_barge_settings.enabled,
+            threshold=_barge_settings.threshold,
+            frames_above=_barge_settings.frames_above,
+            cooldown_seconds=_barge_settings.cooldown_seconds,
         )
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
