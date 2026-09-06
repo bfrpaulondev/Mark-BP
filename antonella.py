@@ -186,6 +186,7 @@ class AntonellaLive(AntonellaRuntime):
         """Run the legacy tool through the provider-neutral orchestration lifecycle."""
         name = str(fc.name or "")
         args = dict(fc.args or {})
+        self.voice_latency.mark("agent_start")
 
         async def _legacy_executor():
             return await super(AntonellaLive, self)._execute_tool(fc)
@@ -199,6 +200,7 @@ class AntonellaLive(AntonellaRuntime):
         execution = outcome.execution
         if execution is None:
             return outcome.raw_response
+        self.voice_latency.mark("first_action")
 
         action_suffix = str(args.get("action") or "").strip()
         action_name = f"{name}.{action_suffix}" if action_suffix else name

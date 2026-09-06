@@ -62,3 +62,24 @@ mensuráveis nos eventos de `_receive_audio` — follow-up que toca o motor
 - Barge-in por voz automática e fila TTS cancelável (A3/A4) exigem cirurgia
   no motor de áudio de `main.py` — fora desta slice, mantida compatível.
 - `NOT PHYSICALLY BENCHMARKED`: nenhum valor de latência medido em hardware.
+
+## Revisão A8 — exportação por turno (2026-09-06)
+
+O runtime actual chama `VoiceLatency.complete_turn()` em `_receive_audio`,
+antes de limpar os marcos. Escreve atomicamente `voice_metrics.json` no
+ directório de execução, com os últimos 200 turnos desta sessão, identificador
+sequencial, estado de interrupção e durações. Não guarda áudio, transcrições,
+prompts ou chaves. Uma falha de escrita é comunicada no log; o histórico fica
+em memória para a próxima exportação. O ficheiro é substituído por sessão.
+
+`python scripts/benchmark_voice.py --input voice_metrics.json` consome esse
+contrato, ignora turnos interrompidos e mostra quantos valores válidos existem.
+`input_transcription_to_first_audio_ms` mede a primeira transcrição recebida
+até ao primeiro áudio recebido, sem afirmar reprodução audível. Os marcos de
+agent/action ainda não têm produtor no caminho Live: aparecem indisponíveis.
+O último frame do microfone é apenas diagnóstico, nunca proxy ou lower bound
+para fim da fala. End-of-speech p95 permanece NOT MEASURED.
+
+O lock do BargeInGate, a passagem do callback para o event loop e a rejeição
+de tokens stale foram preservados. Barge-in continua opt-in. Thresholds,
+speaker bleed e latências físicas permanecem NOT PHYSICALLY TESTED.

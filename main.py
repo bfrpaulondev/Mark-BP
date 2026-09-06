@@ -44,6 +44,7 @@ from google import genai
 from google.genai import types
 from config import get_gemini_key
 from ui import AntonellaUI, JarvisUI  # JarvisUI alias kept during migration
+from core.voice_runtime import BargeInGate, TurnRegistry, VoiceLatency
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary, pop_last_session,
@@ -573,6 +574,20 @@ class AntonellaRuntime:
         self.out_queue            = None
         self._loop                = None
         self._is_speaking         = False
+        # Voice runtime primitives (ANT-271 A3-A5): turn ownership for
+        # stale-audio rejection, client-side latency milestones, and the
+        # opt-in energy-gated barge-in detector.
+        self._audio_turn          = TurnRegistry()
+        self.voice_latency        = VoiceLatency()
+        _cfg = get_config()
+        self._voice_fast_path_enabled = False  # V4: off until model-turn suppression is safe
+        self._voice_fast_path_candidates = 0
+        self._barge_gate          = BargeInGate(
+            enabled=bool(_cfg.get("barge_in_enabled") or False),
+            threshold=int(_cfg.get("barge_in_threshold") or 900),
+            frames_above=int(_cfg.get("barge_in_frames") or 3),
+            cooldown_seconds=float(_cfg.get("barge_in_cooldown") or 2.0),
+        )
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
@@ -580,7 +595,7 @@ class AntonellaRuntime:
         self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
-        self._interrupted          = False   # True while draining audio after user interrupt
+        self._interrupted_event    = threading.Event()  # V3: coordinated cross-thread interrupt state
         self.ui.on_text_command   = self._on_text_command
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
@@ -661,9 +676,32 @@ class AntonellaRuntime:
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
 
+    def request_interrupt(self) -> None:
+        """V1/V3: thread-safe entry point for interrupt requests.
+
+        The sounddevice callback thread must NOT touch the asyncio queue
+        directly; it only signals here, and the drain runs inside the
+        event loop when this method is invoked from it.
+        """
+        self._interrupted_event.set()
+        self._audio_turn.advance()  # queued/in-flight audio becomes stale
+        loop = self._loop
+        if loop is None:
+            self.interrupt()  # no live loop: nothing asyncio-owned to touch
+            return
+        try:
+            asyncio.get_running_loop()
+            self.interrupt()  # already on the event loop
+        except RuntimeError:
+            loop.call_soon_threadsafe(self.interrupt)  # off-loop: schedule
+
     def interrupt(self) -> None:
-        """Stop assistant speech: drain queued audio and open mic immediately."""
-        self._interrupted = True
+        """Stop assistant speech: drain queued audio and open mic immediately.
+
+        Event-loop-owned: drains the asyncio queue and flips coordinated
+        state. Other threads call ``request_interrupt()`` instead."""
+        self._interrupted_event.set()
+        self._audio_turn.advance()  # V2: queued/in-flight audio becomes stale
         q = self.audio_in_queue
         if q:
             drained = 0
@@ -694,7 +732,7 @@ class AntonellaRuntime:
     def speak_error(self, tool_name: str, error: str):
         short = str(error)[:120]
         self.ui.write_log(f"ERR: {tool_name} — {short}")
-        self.speak(f"Sir, {tool_name} encountered an error. {short}")
+        self.speak(f"Não consegui concluir {tool_name}. {short}")
 
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
@@ -969,8 +1007,21 @@ class AntonellaRuntime:
         def callback(indata, frames, time_info, status):
             with self._speaking_lock:
                 assistant_speaking = self._is_speaking
-            if not assistant_speaking and not self.ui.muted and not self._phone_active:
-                data = indata.tobytes()
+            data = indata.tobytes()
+            if assistant_speaking:
+                # V1: opt-in automatic barge-in — analyse mic energy while
+                # speaking; on detection interrupt() stops playback and
+                # reopens the mic. Audio is never sent mid-speech.
+                import audioop
+
+                if self._barge_gate.feed(audioop.rms(data, 2), time.monotonic()):
+                    # V1: the sounddevice thread NEVER drains the asyncio
+                    # queue itself — it only requests the interrupt, and
+                    # request_interrupt() hands it to the event loop.
+                    self.request_interrupt()
+                return
+            if not self.ui.muted and not self._phone_active:
+                self.voice_latency.mark("last_user_audio")
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
                     {"data": data, "mime_type": "audio/pcm"}
@@ -1000,7 +1051,7 @@ class AntonellaRuntime:
                 async for response in self.session.receive():
 
                     if response.data:
-                        if self._interrupted:
+                        if self._interrupted_event.is_set():
                             pass  # discard: interrupted
                         else:
                             if self._turn_done_event and self._turn_done_event.is_set():
@@ -1009,8 +1060,10 @@ class AntonellaRuntime:
                             # (24000 Hz × 2 bytes/sample × 0.05 s = 2400 bytes per slice)
                             _audio_data = response.data
                             _SLICE = 2400
+                            self.voice_latency.mark("first_response_audio")
+                            _turn = self._audio_turn.current()
                             for _i in range(0, len(_audio_data), _SLICE):
-                                self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
+                                self.audio_in_queue.put_nowait((_turn, _audio_data[_i : _i + _SLICE]))
 
                     if response.server_content:
                         sc = response.server_content
@@ -1025,15 +1078,34 @@ class AntonellaRuntime:
                             if txt:
                                 in_buf.append(txt)
                                 self._last_user_speech = time.monotonic()
+                                self.voice_latency.mark("input_transcription")
+                                # V4: deterministic voice fast-path detection.
+                                # SUPPRESSION of the in-flight model turn is
+                                # not safe with the current Live API usage, so
+                                # detection is only counted for the benchmark
+                                # report (never double-executed).
+                                if getattr(self, "_voice_fast_path_enabled", False):
+                                    from core.local_command_router import parse_local_text_command
+
+                                    if parse_local_text_command(txt) is not None:
+                                        self._voice_fast_path_candidates += 1
 
                         if sc.turn_complete:
                             if self._turn_done_event:
                                 self._turn_done_event.set()
+                            # V4: the finished turn's metrics are final;
+                            # the next turn starts with clean milestones.
+                            try:
+                                self.voice_latency.complete_turn(
+                                    interrupted=self._interrupted_event.is_set()
+                                )
+                            except OSError:
+                                self.ui.write_log("SYS: Voice metrics export failed; history retained in memory.")
 
                             # If this turn_complete ends an interrupted response, clear the
                             # flag and skip all further processing for that turn.
-                            if self._interrupted:
-                                self._interrupted = False
+                            if self._interrupted_event.is_set():
+                                self._interrupted_event.clear()
                                 in_buf  = []
                                 out_buf = []
                                 continue
@@ -1056,7 +1128,7 @@ class AntonellaRuntime:
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
                                 if self._dashboard:
                                     asyncio.create_task(self._dashboard.broadcast({
-                                        "type": "log", "speaker": "jarvis",
+                                        "type": "log", "speaker": "antonella",
                                         "text": full_out,
                                         "ts": datetime.now().isoformat(),
                                     }))
@@ -1121,7 +1193,7 @@ class AntonellaRuntime:
         try:
             while True:
                 try:
-                    chunk = await asyncio.wait_for(
+                    _turn_token, chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(),
                         timeout=0.1
                     )
@@ -1135,20 +1207,16 @@ class AntonellaRuntime:
                         self._turn_done_event.clear()
                     continue
 
+                if not self._audio_turn.is_current(_turn_token):
+                    continue  # V2: stale audio from an interrupted turn
+
                 self.set_speaking(True)
 
-                # Batch all immediately-available chunks into one write to reduce
-                # thread-pool round-trips (was one asyncio.to_thread per 50ms slice).
-                # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
-                batch = bytearray(chunk)
-                while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    try:
-                        batch.extend(self.audio_in_queue.get_nowait())
-                    except asyncio.QueueEmpty:
-                        break
-
+                # V2: batching is removed until provably safe — writing the
+                # ~50 ms chunk as-is keeps interrupt latency within one
+                # chunk and can never mix turns in a single write.
                 try:
-                    await asyncio.to_thread(stream.write, bytes(batch))
+                    await asyncio.to_thread(stream.write, chunk)
                 except (RuntimeError, asyncio.CancelledError):
                     break   # executor shutting down — exit cleanly
         except Exception as e:
@@ -1517,7 +1585,7 @@ class AntonellaRuntime:
                     self._vision_close_pending = False
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
-                    self._interrupted          = False
+                    self._interrupted_event.clear()
 
                     print("[Antonella] Connected.")
                     self.ui.set_state("LISTENING")

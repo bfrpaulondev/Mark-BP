@@ -133,3 +133,11 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 3. ANT-263 — Provider Router completo;
 4. ANT-264–267 — custo/Computer Use/ScreenConnect;
 5. ANT-268+ — UI/voz/observabilidade/E2E/memória.
+
+### Revisão #66 — A8 runtime (2026-09-06)
+
+Exportação limitada e sem conteúdo por turno ligada ao receive loop antes do
+reset; benchmark usa o ficheiro emitido pelo runtime. Regressões cobrem lock,
+múltiplos turnos, falha de escrita e consumo real da exportação. Preservadas
+as correcções de concorrência do Principal. Fim da fala e playback físico
+continuam não medidos; a revisão/CI do HEAD é registada no próprio PR.

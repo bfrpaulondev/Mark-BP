@@ -28,3 +28,6 @@ visual_states/
 
 # Windows E2E physical reports
 windows_e2e_reports/
+
+# Content-free runtime voice telemetry
+voice_metrics.json
