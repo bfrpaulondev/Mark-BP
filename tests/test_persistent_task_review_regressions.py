@@ -65,7 +65,7 @@ class PersistentTaskReviewRegressionTests(unittest.TestCase):
         self.assertEqual(final.state, TaskState.COMPLETED)
         self.assertEqual(calls, ["ran"])
 
-    def test_dangerous_approval_without_canonical_manager_fails_closed(self):
+    def test_lifecycle_transition_without_manager_never_authorizes_dangerous_step(self):
         store = InMemoryTaskStore()
         service = TaskService(store=store, clock=lambda: 1000.0)
         task = service.create(
@@ -81,18 +81,23 @@ class PersistentTaskReviewRegressionTests(unittest.TestCase):
             ],
         )
         manager = HumanApprovalManager(clock=lambda: 1000.0)
+        calls = []
         runner = TaskRunner(
             store=store,
-            executor=lambda _step: {"ok": True},
+            executor=lambda _step: calls.append("ran") or {"ok": True},
             approval_manager=manager,
             clock=lambda: 1000.0,
         )
-        runner.run(task)
+        parked = runner.run(task)
+        original_request_id = parked.approval_request_id
 
-        with self.assertRaises(ValueError):
-            service.approve(task.id, owner_id="u1")
+        transitioned = service.approve(task.id, owner_id="u1")
+        self.assertEqual(transitioned.state, TaskState.CREATED)
+        self.assertEqual(transitioned.approval_request_id, original_request_id)
 
-        self.assertEqual(store.get_task(task.id, "u1").state, TaskState.AWAITING_APPROVAL)
+        reparking = runner.run(transitioned)
+        self.assertEqual(reparking.state, TaskState.AWAITING_APPROVAL)
+        self.assertEqual(calls, [])
 
     def test_safe_legacy_task_level_approval_remains_compatible(self):
         store = InMemoryTaskStore()
