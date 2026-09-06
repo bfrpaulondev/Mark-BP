@@ -13,11 +13,12 @@ from datetime import datetime, timedelta, timezone
 
 @dataclass(frozen=True)
 class SchedulerSpec:
-    kind: str  # once | interval | daily
+    kind: str  # once | interval | daily | weekly
     at_epoch: float | None = None       # once
     interval_seconds: int | None = None  # interval
     daily_hour: int | None = None        # daily
     daily_minute: int = 0
+    weekly_weekday: int | None = None    # weekly: 0=Monday .. 6=Sunday
     tz_offset_minutes: int = 0           # timezone as fixed UTC offset
 
 
@@ -39,6 +40,22 @@ def next_due(spec: SchedulerSpec, *, now: float, last_run: float | None = None) 
         if last_run is None:
             return now
         return last_run + spec.interval_seconds
+
+    if spec.kind == "weekly":
+        if spec.daily_hour is None or spec.weekly_weekday is None:
+            return None
+        local = _to_local(now, spec.tz_offset_minutes)
+        candidate = local.replace(hour=spec.daily_hour, minute=spec.daily_minute, second=0, microsecond=0)
+        days_ahead = (spec.weekly_weekday - candidate.weekday()) % 7
+        candidate += timedelta(days=days_ahead)
+        candidate_epoch = candidate.timestamp()
+        if last_run is not None and candidate_epoch <= last_run:
+            candidate += timedelta(days=7)
+            candidate_epoch = candidate.timestamp()
+        if candidate_epoch <= now and (last_run is None or candidate_epoch > last_run):
+            candidate += timedelta(days=7)
+            candidate_epoch = candidate.timestamp()
+        return candidate_epoch
 
     if spec.kind == "daily":
         if spec.daily_hour is None or not 0 <= spec.daily_hour <= 23:
