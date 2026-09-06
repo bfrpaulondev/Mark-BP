@@ -96,3 +96,29 @@ class RouterReviewTests(unittest.TestCase):
         router = ProviderRouter({}, adapters={'openai': Adapter(), 'gemini': Adapter()})
         self.assertEqual([c.provider.value for c in router.candidate_plan(role='fast')], ['gemini', 'openai'])
         self.assertEqual([c.provider.value for c in router.candidate_plan(role='expert')], ['openai', 'gemini'])
+
+
+class ProviderRuntimeConfigurationTests(unittest.TestCase):
+    def test_runtime_config_accepts_new_preferences_and_environment_keys_and_models(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from config.settings import load_config, load_settings
+        for provider in ('groq', 'anthropic'):
+            values = {f'ANTONELLA_{provider.upper()}_API_KEY': 'fixture-secret',
+                      f'ANTONELLA_{provider.upper()}_MODEL_BALANCED': 'fixture-model',
+                      'ANTONELLA_MODEL_PROVIDER_PREFERENCE': provider}
+            with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, values, clear=True):
+                path = Path(directory) / 'config.json'
+                config = load_config(path)
+                self.assertNotIn('fixture-secret', repr(load_settings(path)))
+                with patch.object(ProviderRouter, '_build_default_adapters', return_value={ProviderName(provider): Adapter()}):
+                    router = ProviderRouter(config)
+                result = router.generate_text(prompt='test')
+                self.assertEqual(result.provider, provider)
+                self.assertEqual(result.model, 'fixture-model')
+
+    def test_all_adapter_5xx_statuses_retry_and_trip_breaker(self):
+        for status in (501, 529, 599):
+            self.assertEqual(ProviderRouter._classify_error(RuntimeError(f'Anthropic Messages API returned HTTP {status} (retryable).')),
+                             ('transient_provider', True, True))

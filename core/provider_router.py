@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from collections.abc import Mapping
@@ -673,6 +674,10 @@ class ProviderRouter:
         text = str(exc or "").casefold()
         if "no usable text" in text or "no output text" in text:
             return "empty_response", True, False
+
+        http_status = re.search(r"\bhttp\s+(\d{3})\b", text)
+        if http_status and (int(http_status[1]) == 429 or 500 <= int(http_status[1]) <= 599):
+            return "transient_provider", True, True
 
         if isinstance(exc, (TimeoutError, ConnectionError)) or any(
             marker in text

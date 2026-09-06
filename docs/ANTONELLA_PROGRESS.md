@@ -144,3 +144,8 @@ e configurações de modelos dos quatro providers. Regressões cobrem cada
 role, auto com um único provider, retry/circuit/health, rotações de cache e
 exclusão de vision. Pricing desconhecido continua desconhecido; não há novos
 modelos ou preços por defeito. HTTP real: NOT RUN. CI/HEAD no próprio PR.
+
+O contrato tipado de settings também aceita as novas preferências, keys como
+SecretStr e modelos explícitos por ambiente/config; teste percorre settings
+até ao router. Todos os HTTP 5xx dos adapters, incluindo 529, classificam-se
+como transientes com retry/breaker limitado. Não foi alterada a UI.
