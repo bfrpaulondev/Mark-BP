@@ -1,143 +1,149 @@
 # Antonella — Estado da execução
 
-> Painel operacional. O plano mestre continua a ser a fonte do escopo completo. As melhorias prioritárias das áreas já funcionais estão detalhadas em `docs/ANTONELLA_PRIORITY_HARDENING.md`.
+> Painel operacional do estado real da `main`. O plano mestre continua em `docs/ANTONELLA_MASTER_ROADMAP.md`; prioridades e gates estão em `docs/ANTONELLA_PRIORITY_HARDENING.md`.
 
-**Última atualização:** 2026-09-05
-**Branch canónica:** `main`
-**Main confirmado antes da PR #36:** `c76df10bb71254f61863141c9dac3bd861506a98`
+**Última actualização:** 2026-09-06  
+**Branch canónica:** `main`  
+**Main consolidada antes desta PR de documentação:** `674c3ee6d1846fb938ec6e3f65280e359896f413`  
+**Critério central:** quando consegue, prova; quando não consegue, sabe que não conseguiu e não inventa sucesso.
 
-## Estado atual
+## Resumo operacional
 
-| Campo | Estado |
+| Área | Estado |
 |---|---|
-| Tarefa a fechar | ANT-260 — ToolRouter + ExecutionEngine |
-| Branch de implementação | `codex/ant-260-tool-router-execution-engine` |
-| Pull request | PR #36 — extract ToolRouter and ExecutionEngine |
-| Issues abertas | Nenhuma necessária para este trabalho |
-| CI de código | PR #35 verde e integrada; CI da PR #36 pendente no head de documentação |
-| Próximo teste real | ANT-275 Windows físico: UIA, settings, filesystem, multi-monitor/DPI e browser real |
-| Próximo bloco | ANT-261 — Policy Engine central independente do LLM |
+| P0 execução verificável — ANT-251–258 | Integrado no código; validação física continua em ANT-275 |
+| Agent core — ANT-259–263 | Integrado |
+| Custo/percepção/Computer Use — ANT-264–267 | Integrado no código; físico pendente |
+| UI — ANT-268–270 | Integrada no escopo automático; DPI/render físico pendente |
+| Voz — ANT-271 | Código A1–A8 integrado; barge-in/bleed/latência audível físicos pendentes; fast voice path completo ainda não |
+| Identidade — ANT-272 | Superfícies vivas limpas e `ui.py` removido; aliases/asset legado remanescentes ainda precisam de remoção final |
+| Windows CI/observabilidade — ANT-273/274 | Integrados |
+| Windows E2E — ANT-275 | Harness + executores físicos integrados; execução formal no hardware do utilizador pendente |
+| Memory — ANT-276 | Core + lifecycle + Supabase adapter + runtime wiring integrados; Supabase/RLS reais e aprovação UI específica pendentes |
+| Skills — ANT-277 | Core + registry + runner + selecção dinâmica + 4 product skills em DRAFT integrados; wiring end-to-end ao orchestrator/activação ainda pendente |
+| Persistent Tasks — ANT-278 | Core + runner + scheduler + proactividade bounded integrados; experiência de produto completa ainda pendente |
+| Anthropic/Groq | Adapters + ProviderRouter text-only integrados; HTTP real não executado |
+| MT5/Fimathe | Ainda não iniciado; subordinado aos gates acima |
 
-## Prioridade aprovada em 2026-09-05
+## Entregas integradas relevantes
 
-1. ANT-251–258 — execução verificável / P0;
-2. ANT-259–263 — AgentOrchestrator, ToolRouter/ExecutionEngine, Policy Engine, aprovação humana e Provider Router;
-3. ANT-264–267 — custo/telemetria, percepção local, ScreenConnect e recovery;
-4. ANT-268–272 — UI/UX, Agent Control Center, voz/verificação e identidade;
-5. ANT-273–275 — Windows CI, observabilidade e E2E real;
-6. ANT-276–278 — Supabase Memory, Skills e Persistent Tasks;
-7. MT5/Fimathe depois dos gates de core/segurança/confiabilidade.
+### Execução verificável e agente
 
-Critério central: **quando consegue, prova; quando não consegue, sabe que não conseguiu e não inventa sucesso.**
+- PR #24: Local Fast Path + `ExecutionResult`.
+- PR #25: Verifier central.
+- PR #26–#34: apps/janelas, mouse/teclado, browser verificável, CDP seguro, multi-monitor/DPI e postconditions para UIA/files/settings.
+- PR #35: `AgentOrchestrator`.
+- PR #36: `ToolRouter` + `ExecutionEngine`.
+- PR #38: Policy Engine central.
+- PR #39: aprovação humana action-bound, expirada e one-use.
+- PR #41: ProviderRouter OpenAI/Gemini.
 
-## Entregas integradas
+### Custo, percepção e Computer Use
 
-- PR #1–#22: baseline, UI/voz, multi-monitor, Computer Use económico, OpenAI, HUD, preferências, batching, painel do agente, captura por janela e primeiro controlo verificável de abas/rato.
-- PR #23: runtime-readiness; merge `2952eb9c26f4c04b8dbd6e945daf2395eebe6107`; CI verde.
-- PR #24: Local Fast Path + `ExecutionResult`; merge `3e084adaaf25d87a7cab71e352a2bb1c49b8f021`; CI verde.
-- PR #25: Verifier central; merge `8b4371f15b312834743cdf08e07ad6a180d298ff`; fail-closed para side effects; CI verde.
-- PR #26–#28: apps/janelas + desktop input postconditions; ANT-254/255 fechados no código; CI verde.
-- PR #29: browser real Win32/UIA; merge `56a91411d7b30a69096305e1c7267875911b33fb`; ambiguity fail-closed.
-- PR #30: managed Playwright verification; merge `6ca8e8e4cf37bca6bc4f5a8ce4c2aa0f708fe43a`.
-- PR #31: SPA/popups/downloads; merge `3186a1406f496a7004c8696805680c50b7e59a3e`.
-- PR #32: safe optional CDP bridge; merge `aaabdda9485483712b88413f3be4e584be3e3886`.
-- PR #33: multi-monitor/DPI hardening; merge `6cd8601b9a0a9b4d3a9a94ceb701f5ab993fd8c8`; stale display frames falham fechados.
-- PR #34: UIA/files/settings postconditions; merge `34b3f54`; CI verde; E2E Windows físico pendente.
-- PR #35: `AgentOrchestrator` incremental; merge `c76df10bb71254f61863141c9dac3bd861506a98`; CI verde.
+- PR #43: usage/custo bounded, sem pricing inventado.
+- PR #45: percepção/cache local e UIA-first fail-closed.
+- PR #48: recovery bounded, stale-plan rejection, target reacquisition, pause/resume/stop e revalidação pós-aprovação.
 
-## ANT-257 — integrado
+### UI, voz e identidade
 
-- Per-Monitor DPI Awareness V2 em Windows;
-- geometria física Win32 + MSS, sem assumir ordem de enumeração;
-- DPI/scale/primary/device por display;
-- suporta monitor à esquerda/acima e coordenadas negativas;
-- `topology_token` muda com geometria, DPI, primary e hot-plug;
-- target de monitor explícito fica preso à identidade física (`device` + geometria fallback);
-- disconnect/reconnect não reutiliza silenciosamente índice antigo;
-- frame antigo é invalidado após mudança de topologia;
-- input visual exige token capturado + token vivo iguais; se a topologia não puder ser lida, o input não é despachado;
-- CI final #99 totalmente verde antes do merge;
-- validação física permanece no ANT-275.
+- PR #37/#42/#44/#49/#54: estados operacionais, Agent Control Center, acessibilidade, sizing, visual regression e settings fail-closed.
+- PR #55/#57: fala de sucesso vinculada a verificação e wiring de feedback no fast path.
+- PR #58: resíduos vivos de identidade antiga removidos do runtime.
+- PR #63: `ui.py` legado removido.
+- PR #64: nomes canónicos `AntonellaUI` / `AntonellaRuntime`; aliases temporários continuam apenas por compatibilidade.
+- PR #65: QSS e tab order corrigidos; DPI físico continua gate separado.
+- PR #66: Voice A3–A8 integrado após principal review: turn tokens, barge-in opt-in thread-safe, stale-audio rejection, métricas por turno e benchmark que consome o ficheiro real do runtime. `last_user_audio` não é tratado como end-of-speech.
 
-## ANT-258 — PR #34
+### Testes físicos
 
-### Windows UI Automation
+- PR #59: harness Windows E2E, capability probe, matriz, evidência sanitizada e fixtures.
+- PR #67: executores físicos revistos pelo Principal e integrados. Sem gate físico nada é promovido a PASS. A execução formal continua pendente no Windows real.
 
-- `list_windows`, `inspect` e `find` são tratados como reads;
-- `click` e `set_text` são side effects e devolvem `delivered/verified` explícitos;
-- janela/controlo com múltiplos matches igualmente fortes falha fechado;
-- click só verifica uma transição estrutural/UIA; mudança isolada de foco ou foreground fica em evidence, mas não prova sucesso;
-- set_text relê o valor exacto;
-- texto real fica apenas em memória e não entra na evidence;
-- erro no readback depois de input entregue fica `delivered=true, verified=false`.
+### Memory / Skills / Tasks
 
-### Filesystem
+- PR #60: Memory core, migrations e lifecycle com conflitos/supersession/owner isolation.
+- PR #61: Skills core versionado e lifecycle seguro.
+- PR #62: Persistent Tasks com checkpoint, approval canónico, reconciliation e verificação separada de delivery.
+- PR #68: Supabase Memory adapter, timestamptz real e migration de metadata.
+- PR #69: proactividade bounded, quiet hours, weekly schedule e evidence.
+- PR #70: Skill runner em subprocess best-effort, com timeout/cancel/secrets redacted.
+- PR #72: `daily-report`, `meeting-copilot`, `meeting-action-items`, `workday-summary` em DRAFT.
+- PR #73: comandos naturais de memória.
+- PR #74: selecção dinâmica bounded/relevant-only.
+- PR #78: runtime Memory wiring revisto e integrado sobre a árvore que já contém Voice e Providers. Supabase configurado mas avariado falha fechado; configuração ausente usa InMemory explicitamente como memória apenas da sessão.
 
-- pre-state e post-state usam exactamente source/destination resolvidos antes da mutação;
-- o verificador respeita os mesmos `_SAFE_ROOTS` do `file_controller` e não inspecciona paths que a tool recusaria;
-- create/write/append/delete/move/copy/rename/organize têm postconditions próprias;
-- ficheiros pequenos usam hash completo; ficheiros grandes usam fingerprint bounded first/last + size;
-- append confirma tamanho e tail exacto;
-- move/copy/rename confirmam identidade estrutural/conteúdo;
-- ficheiro vazio é suportado correctamente;
-- full path, filename e conteúdo são retirados da evidence pública.
+### Providers adicionais
 
-### Settings Windows
+- PR #71: adapters Anthropic/Groq text-only.
+- PR #77: integração revista no ProviderRouter depois de #66. Modelos são explícitos por provider/role; auto/fallback/circuit/health/cache cobrem os quatro providers; Anthropic/Groq ficam excluídos de Vision até suporte real. Pricing não é inventado.
 
-- volume set/up/down, mute/unmute/toggle: readback do endpoint de áudio;
-- brightness up/down: estado WMI/CIM;
-- dark mode: registry HKCU;
-- Wi-Fi toggle: estado do adapter;
-- minimize/maximize/switch_window mantêm o verificador Win32 anterior;
-- se o estado não puder ser observado, a acção não é promovida a sucesso.
+## Gates ainda abertos
 
-## ANT-259 — integrado por PR #35
+### G1 — ANT-275: Windows físico
 
-- lifecycle explícito no `AgentOrchestrator`;
-- callbacks provider-neutral para captura e verificação;
-- correlation id e eventos sem valores dos argumentos;
-- runtime legado preservado;
-- CI verde; smoke test Windows real pendente.
+Executar formalmente no hardware real:
 
-## ANT-260 — PR #36
+- UIA, mouse/teclado, filesystem e settings;
+- browser real/Playwright;
+- DPI 100/125/150% e multi-monitor;
+- hot-plug/reacquisition onde suportado;
+- áudio, barge-in e speaker bleed;
+- métricas de voz físicas.
 
-- `ToolRouter` classifica ferramentas existentes por tier sem as executar;
-- prioridade explícita: direct/local → API/DOM/UIA → CV local → modelo rápido → Vision/Computer Use;
-- `ExecutionEngine` possui o despacho sync/async e preserva exceções/cancelamento;
-- tools desconhecidas mantêm fallback legado;
-- router e engine são injectáveis no `AgentOrchestrator`;
-- metadados de rota não incluem valores dos argumentos;
-- não altera policy, approvals nem provider selection.
+CI/offscreen não substitui este gate.
 
-## Realtime Computer Use económico — integrado, E2E físico pendente
+### G2 — Voz
 
-- stream desktop em background com tiers locais;
-- monitor automático/explícito e coordenadas negativas;
-- frame diff local e target-window ROI;
-- economy default, budgets, OpenAI opcional/fallback Gemini;
-- micro-batching conservador;
-- approvals de uso único e stop durante execução/espera;
-- ANT-257 agora impede input com frame/topologia obsoletos.
+- threshold físico de barge-in;
+- distinguir bleed da própria Antonella de fala do utilizador;
+- latência audível real;
+- true end-of-speech continua `NOT MEASURED` sem sinal VAD/end-turn fiável;
+- fast voice path completo continua pendente porque a supressão segura do turno Live em voo ainda não está resolvida.
 
-## Validações e limites conhecidos
+### G3 — Supabase real
 
-- Unit tests/CI Linux não provam Win32, UIA, pycaw, WMI/CIM, áudio físico, DPI, multi-monitor, Playwright GUI/CDP real ou ScreenConnect.
-- Um efeito sem estado observável suficiente permanece `verified=false`.
-- E2E Windows físico continua centralizado no ANT-275.
-- O `AgentOrchestrator` está integrado; ToolRouter/ExecutionEngine permanecem em PR até CI e revisão.
+- aplicar/verificar migrations num projecto controlado;
+- autenticação real de utilizador;
+- RLS com duas sessões/owners;
+- archive/read-back/cleanup;
+- reconnect/session expiry;
+- nenhuma service-role/secret key no desktop.
+
+O validador existe, mas HTTP/Postgres/RLS reais continuam `NOT RUN`.
+
+### G4 — Memory approval UX
+
+Os comandos mutantes criam propostas ou identificam a acção e exigem aprovação; ainda falta ligar a conclusão dessa aprovação de memória à superfície canónica de aprovação/Brain Studio. Não marcar `Aprende...`/`Esquece...` como fluxo de produto completo até este wiring existir.
+
+### G5 — Skills end-to-end
+
+Core, runner e selection existem, mas falta fechar o caminho:
+
+`intent → select → policy/approval → SkillRunner → ExecutionResult → verifier → evidence`.
+
+As quatro product skills permanecem DRAFT até aprovação humana explícita.
+
+### G6 — Identidade final
+
+- remover aliases `JarvisUI`/compatibilidade equivalentes depois de provar zero consumidores;
+- auditar/remover `config/jarvis.ico` se continuar sem consumidor;
+- manter regressão que impede referências activas a JARVIS/Mark/Tony Stark/Iron Man.
 
 ## Próxima sequência
 
-1. validar e integrar PR #36 apenas com CI final verde;
-2. ANT-261/262 — Policy Engine + aprovação humana vinculada;
-3. ANT-263 — Provider Router completo;
-4. ANT-264–267 — custo/Computer Use/ScreenConnect;
-5. ANT-268+ — UI/voz/observabilidade/E2E/memória.
+1. executar ANT-275 físico no Windows e produzir relatórios formais;
+2. validar Supabase/RLS real separadamente;
+3. fechar Memory approval UX + Brain Studio backend/API;
+4. fechar Skills end-to-end e activar as product skills uma a uma após aprovação;
+5. completar Persistent Tasks/proactividade na experiência de produto;
+6. remover aliases/assets de identidade herdada que se provem mortos;
+7. só então iniciar MT5/Fimathe em `observer → drawing → replay → backtest → demo-confirmed → live-confirmed`.
 
-### Revisão #66 — A8 runtime (2026-09-06)
+## Limites que não podem ser sobredeclarados
 
-Exportação limitada e sem conteúdo por turno ligada ao receive loop antes do
-reset; benchmark usa o ficheiro emitido pelo runtime. Regressões cobrem lock,
-múltiplos turnos, falha de escrita e consumo real da exportação. Preservadas
-as correcções de concorrência do Principal. Fim da fala e playback físico
-continuam não medidos; a revisão/CI do HEAD é registada no próprio PR.
+- HTTP real Anthropic/Groq: `NOT RUN`.
+- Supabase/Postgres/RLS real: `NOT RUN`.
+- barge-in/bleed/DPI/multi-monitor/latência audível físicos: `NOT PHYSICALLY TESTED` nesta árvore.
+- subprocess de Skills é isolamento best-effort, não sandbox forte.
+- product skills em DRAFT não significam integração Teams/relatório empresarial end-to-end.
+- MT5/Fimathe ainda não está implementado.
