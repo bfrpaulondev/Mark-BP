@@ -120,12 +120,20 @@ def _windows_monitors() -> list[dict[str, Any]]:
     return monitors
 
 
-def _browser_available(browser: str) -> bool:
-    """Return only a boolean; candidate paths are never emitted."""
-    if sys.platform != "win32":
-        return False
-
-    candidates: dict[str, tuple[tuple[str, str], ...]] = {
+# -.-.-.-
+def _browser_candidates() -> dict[str, tuple[tuple[str, str], ...]]:
+    """Known Chromium-family install locations; paths are never emitted."""
+    return {
+        "brave": (
+            ("ProgramFiles", "BraveSoftware/Brave-Browser/Application/brave.exe"),
+            ("ProgramFiles(x86)", "BraveSoftware/Brave-Browser/Application/brave.exe"),
+            ("LOCALAPPDATA", "BraveSoftware/Brave-Browser/Application/brave.exe"),
+        ),
+        "chromium": (
+            ("ProgramFiles", "Chromium/Application/chrome.exe"),
+            ("ProgramFiles(x86)", "Chromium/Application/chrome.exe"),
+            ("LOCALAPPDATA", "Chromium/Application/chrome.exe"),
+        ),
         "chrome": (
             ("ProgramFiles", "Google/Chrome/Application/chrome.exe"),
             ("ProgramFiles(x86)", "Google/Chrome/Application/chrome.exe"),
@@ -136,11 +144,28 @@ def _browser_available(browser: str) -> bool:
             ("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"),
         ),
     }
-    for env_var, relative in candidates.get(browser, ()):
+
+
+# -.-.-.-
+def _browser_available(browser: str) -> bool:
+    """Return install availability only; never infer which browser the user prefers."""
+    if sys.platform != "win32":
+        return False
+
+    for env_var, relative in _browser_candidates().get(browser, ()):
         base = os.environ.get(env_var)
         if base and (Path(base) / relative).exists():
             return True
     return False
+
+
+# -.-.-.-
+def _browser_availability() -> dict[str, bool]:
+    """Return a bounded browser availability map without paths or preference claims."""
+    return {
+        browser: _browser_available(browser)
+        for browser in ("brave", "chromium", "chrome", "edge")
+    }
 
 
 def _microphone_available() -> bool:
@@ -172,6 +197,7 @@ def probe() -> dict[str, Any]:
             "sounddevice",
         )
     }
+    browsers = _browser_availability()
     return {
         "platform": sys.platform,
         "windows_version": platform.version() if sys.platform == "win32" else "",
@@ -190,9 +216,14 @@ def probe() -> dict[str, Any]:
             ),
             None,
         ),
-        "chrome_available": _browser_available("chrome"),
-        "edge_available": _browser_available("edge"),
+        "browsers_available": browsers,
+        "brave_available": browsers["brave"],
+        "chromium_available": browsers["chromium"],
+        "chrome_available": browsers["chrome"],
+        "edge_available": browsers["edge"],
+        "browser_test_engine": "playwright-chromium",
         "microphone_available": _microphone_available(),
+        "optional_dependencies": optional,
         **optional,
         "cdp_available": bool(os.environ.get("ANTONELLA_E2E_CDP")),
     }
