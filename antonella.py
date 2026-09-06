@@ -25,6 +25,8 @@ from main import (
 from ui import AntonellaUI, JarvisUI  # alias during migration
 from ui.runtime_dashboard import attach_runtime_dashboard
 from ui.voice_feedback import local_command_feedback
+from memory.bootstrap import create_memory_stack
+from memory.command_bridge import MemoryCommandBridge
 
 
 DEFAULT_VOICE = "Kore"
@@ -43,6 +45,12 @@ class AntonellaLive(AntonellaRuntime):
     def __init__(self, ui: AntonellaUI):
         super().__init__(ui)
         self._last_orchestration_event: OrchestrationEvent | None = None
+        # R1/R2/R5: memory stack + natural command bridge + habit ladder.
+        self.memory_stack = create_memory_stack()
+        self.memory_bridge = MemoryCommandBridge(
+            self.memory_stack.service,
+            log=lambda text: self.ui.write_log(f"SYS: memória · {text}"),
+        )
         self._agent_orchestrator = AgentOrchestrator(
             requires_postcondition=requires_postcondition,
             capture_postcondition_state=capture_postcondition_state,
@@ -128,7 +136,19 @@ class AntonellaLive(AntonellaRuntime):
 
     # -.-.-.-
     def _on_text_command(self, text: str) -> None:
-        """Use deterministic local actions before paying for a Live model turn."""
+        """Memory commands first (R1), then deterministic local actions
+        before paying for a Live model turn."""
+        memory_result = self.memory_bridge.handle(text)
+        if memory_result is not None:
+            user_text = str(text or "").strip()
+            self.ui.write_log(f"You: {user_text}")
+            self.ui.write_log(f"SYS: memória · {memory_result['intent']}")
+            self._session_log.append(f"You: {user_text}")
+            assistant_name = getattr(self, '_asst_name', 'Antonella')
+            self.ui.write_log(f"{assistant_name}: {memory_result['spoken']}")
+            self._session_log.append(f"{assistant_name}: {memory_result['spoken']}")
+            self.speak(memory_result["spoken"])
+            return
         intent = parse_local_text_command(text)
         if intent is None:
             super()._on_text_command(text)
@@ -167,6 +187,16 @@ class AntonellaLive(AntonellaRuntime):
             feedback = local_command_feedback(result, verification)
             self.ui.write_log(f"{assistant_name}: {feedback.phrase_pt}")
             self._session_log.append(f"{assistant_name}: {feedback.phrase_pt}")
+            # R5: observation feeds the habit ladder; only a stage
+            # transition produces a suggestion - never execution.
+            suggestion = self.memory_bridge.observe(f"local.{intent.kind}")
+            if suggestion:
+                self.ui.write_log(f"SYS: {suggestion}")
+            # R5: observation feeds the habit ladder; only a stage
+            # transition produces a suggestion - never execution.
+            suggestion = self.memory_bridge.observe(f"local.{intent.kind}")
+            if suggestion:
+                self.ui.write_log(f"SYS: {suggestion}")
             if intent.kind in _SPOKEN_LOCAL_KINDS:
                 # Spoken confirmation through the existing engine channel
                 # (no-op without a live session); phrase honesty is
