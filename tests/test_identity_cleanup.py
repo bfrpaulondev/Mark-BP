@@ -27,9 +27,11 @@ class IdentityCleanupTests(unittest.TestCase):
     def test_live_window_titles_are_antonella(self):
         self.assertIn('self.setWindowTitle("Antonella")', self.live_ui)
 
-    def test_internal_class_names_are_out_of_scope(self):
-        # No mass rename: JarvisUI remains the internal compatibility name.
-        self.assertIn("class JarvisUI", self.live_ui)
+    def test_canonical_internal_names_are_antonella(self):
+        # BLOCO 5: canonical runtime names are Antonella; the legacy name
+        # survives only as an explicit compatibility alias.
+        self.assertIn("class AntonellaUI", self.live_ui)
+        self.assertIn("JarvisUI = AntonellaUI", self.live_ui)
 
 
 if __name__ == "__main__":

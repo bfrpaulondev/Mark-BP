@@ -43,7 +43,7 @@ import sounddevice as sd
 from google import genai
 from google.genai import types
 from config import get_gemini_key
-from ui import JarvisUI
+from ui import AntonellaUI, JarvisUI  # JarvisUI alias kept during migration
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary, pop_last_session,
@@ -453,7 +453,7 @@ TOOL_DECLARATIONS = [
         },
     },
     {
-        "name": "shutdown_jarvis",
+        "name": "shutdown_assistant",
         "description": (
             "Shuts down the assistant completely. "
             "Call this when the user expresses intent to end the conversation, "
@@ -563,9 +563,9 @@ TOOL_DECLARATIONS = [
     },
 ]
 
-class JarvisLive:
+class AntonellaRuntime:
 
-    def __init__(self, ui: JarvisUI):
+    def __init__(self, ui: AntonellaUI):
         self.ui             = ui
         self._asst_name     = "Antonella"   # updated each session from config
         self.session              = None
@@ -916,7 +916,7 @@ class JarvisLive:
                 else:
                     result = "Specify action (add/remove/list) and a topic."
 
-            elif name == "shutdown_jarvis":
+            elif name == "shutdown_assistant":
                 self.ui.write_log("SYS: Shutdown requested.")
                 async def _do_shutdown():
                     await self._save_session_summary()
@@ -968,8 +968,8 @@ class JarvisLive:
 
         def callback(indata, frames, time_info, status):
             with self._speaking_lock:
-                jarvis_speaking = self._is_speaking
-            if not jarvis_speaking and not self.ui.muted and not self._phone_active:
+                assistant_speaking = self._is_speaking
+            if not assistant_speaking and not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
@@ -1616,9 +1616,9 @@ def main():
 
     def runner():
         ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
+        runtime = AntonellaRuntime(ui)
         try:
-            asyncio.run(jarvis.run())
+            asyncio.run(runtime.run())
         except KeyboardInterrupt:
             print("\n🔴 Shutting down...")
 
