@@ -134,3 +134,45 @@ class DiagnosticsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SkillSelectionTests(unittest.TestCase):
+    """E15 — bounded, deterministic selection of active skills."""
+
+    def _registry_with_two_active(self):
+        registry = SkillRegistry()
+        registry.register("report-daily", "1.0.0", (), "low")
+        for state in ("validating", "tested", "awaiting_approval", "active"):
+            registry.transition("report-daily", state)
+        registry.register("network-skill", "1.0.0", ("network",), "medium")
+        for state in ("validating", "tested", "awaiting_approval", "active"):
+            registry.transition("network-skill", state)
+        return registry
+
+    def test_only_active_skills_are_ranked(self):
+        from core.skills.selection import select_skills
+
+        registry = SkillRegistry()
+        registry.register("report-daily", "1.0.0", (), "low")
+        registry.transition("report-daily", "validating")  # not active yet
+        selection = select_skills(registry, intent_text="report")
+        self.assertEqual(selection.ranked, [])
+
+    def test_ungranted_permissions_are_excluded_with_diagnostic(self):
+        from core.skills.selection import select_skills
+
+        registry = self._registry_with_two_active()
+        selection = select_skills(registry, granted_permissions=set(), intent_text="daily")
+        self.assertEqual([item["slug"] for item in selection.ranked], ["report-daily"])
+        self.assertTrue(any("network" in item["reason"] for item in selection.excluded))
+
+    def test_top_k_bounds_and_orders_results(self):
+        from core.skills.selection import select_skills
+
+        registry = self._registry_with_two_active()
+        registry.register("daily-report", "1.0.0", (), "low")
+        for state in ("validating", "tested", "awaiting_approval", "active"):
+            registry.transition("daily-report", state)
+        selection = select_skills(registry, granted_permissions={"network"}, intent_text="report daily", top_k=1)
+        self.assertEqual(len(selection.ranked), 1)
+        self.assertIn(selection.ranked[0]["slug"], ("daily-report", "report-daily"))
