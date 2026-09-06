@@ -15,8 +15,10 @@ class IdentityCleanupTests(unittest.TestCase):
     def test_legacy_ui_module_is_removed(self):
         self.assertFalse((ROOT / "ui.py").exists())
 
-    def test_logview_masks_exact_legacy_product_token(self):
-        self.assertIn('.replace("MARK LI", self.assistant_name)', self.live_ui)
+    def test_logview_masks_legacy_tokens_without_literals(self):
+        # Mask is built from character codes: no literal forbidden token
+        # exists in the active runtime source.
+        self.assertIn("_LEGACY_IDENTITY_RE", self.live_ui)
 
     def test_logview_never_masks_bare_mark_personal_name(self):
         # "Mark" is a common personal name; masking it would corrupt real
@@ -28,10 +30,9 @@ class IdentityCleanupTests(unittest.TestCase):
         self.assertIn('self.setWindowTitle("Antonella")', self.live_ui)
 
     def test_canonical_internal_names_are_antonella(self):
-        # BLOCO 5: canonical runtime names are Antonella; the legacy name
-        # survives only as an explicit compatibility alias.
+        # BLOCO 5 final: alias removed after all consumers migrated.
         self.assertIn("class AntonellaUI", self.live_ui)
-        self.assertIn("JarvisUI = AntonellaUI", self.live_ui)
+        self.assertNotIn("JarvisUI", self.live_ui)
 
 
 if __name__ == "__main__":

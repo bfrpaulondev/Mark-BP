@@ -43,7 +43,7 @@ import sounddevice as sd
 from google import genai
 from google.genai import types
 from config import get_gemini_key
-from ui import AntonellaUI, JarvisUI  # JarvisUI alias kept during migration
+from ui import AntonellaUI
 from core.voice_runtime import BargeInGate, TurnRegistry, VoiceLatency
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
@@ -458,7 +458,7 @@ TOOL_DECLARATIONS = [
         "description": (
             "Shuts down the assistant completely. "
             "Call this when the user expresses intent to end the conversation, "
-            "close the assistant, say goodbye, or stop Jarvis. "
+            "close the assistant, say goodbye, or stop the assistant. "
             "The user can say this in ANY language."
         ),
         "parameters": {
@@ -1680,7 +1680,7 @@ class AntonellaRuntime:
             await asyncio.sleep(delay)
 
 def main():
-    ui = JarvisUI("face.png")
+    ui = AntonellaUI("face.png")
 
     def runner():
         ui.wait_for_api_key()

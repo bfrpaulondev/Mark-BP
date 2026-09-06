@@ -68,7 +68,7 @@ def is_configured() -> bool:
 
 # -.-.-.-
 def get_assistant_name() -> str:
-    return load_api_keys().get("assistant_name", "JARVIS") or "JARVIS"
+    return load_api_keys().get("assistant_name", "Antonella") or "Antonella"
 
 
 # -.-.-.-
@@ -79,7 +79,7 @@ def get_user_name() -> str:
 # -.-.-.-
 def save_assistant_config(assistant_name: str, user_name: str) -> None:
     data = _load_persisted_config()
-    data["assistant_name"] = assistant_name.strip() or "JARVIS"
+    data["assistant_name"] = assistant_name.strip() or "Antonella"
     data["user_name"] = user_name.strip()
     _save_persisted_config(data)
 
