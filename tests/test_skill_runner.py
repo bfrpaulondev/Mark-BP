@@ -1,4 +1,3 @@
-import json
 import os
 import tempfile
 import unittest
@@ -18,7 +17,18 @@ import os
 
 def run(context):
     leaked = os.environ.get("ANTONELLA_TEST_KEY")
-    return {"ok": True, "secret": context["secrets"]["demo_key"], "env_leak": leaked is not None}
+    secret = context["secrets"]["demo_key"]
+    return {
+        "ok": True,
+        "secret": secret,
+        "nested": {"message": "value=" + secret},
+        "env_leak": leaked is not None,
+    }
+'''
+
+SKILL_SECRET_CRASH = '''
+def run(context):
+    raise ValueError("failed with " + context["secrets"]["demo_key"])
 '''
 
 SKILL_SLEEP = '''
@@ -32,8 +42,13 @@ def run(context):
 
 def _manifest(**overrides) -> SkillManifest:
     data = dict(
-        name="Demo", slug="demo-skill", version="1.0.0", description="d",
-        entrypoint="skill:run", permissions=("filesystem.write",), risk="low",
+        name="Demo",
+        slug="demo-skill",
+        version="1.0.0",
+        description="d",
+        entrypoint="skill:run",
+        permissions=("filesystem.write",),
+        risk="low",
         timeout_seconds=15,
     )
     data.update(overrides)
@@ -52,7 +67,6 @@ class IsolatedRunnerTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
         self.runner = SkillRunner(base_working_dir=self.tmp / "runs")
-        (self.tmp / "runs").mkdir(parents=True, exist_ok=True)
         os.environ["ANTONELLA_TEST_KEY"] = "injected-value"
 
     def tearDown(self):
@@ -64,9 +78,19 @@ class IsolatedRunnerTests(unittest.TestCase):
         result = self.runner.run(_manifest(), pkg, {"hello": "antonella"}, {})
         self.assertTrue(result.ok)
         self.assertTrue(result.delivered)
-        self.assertFalse(result.verified)  # ran ≠ verified
+        self.assertFalse(result.verified)
         self.assertEqual(result.output["echo"], {"hello": "antonella"})
         self.assertIsNotNone(result.duration_ms)
+
+    def test_runner_creates_missing_base_working_dir(self):
+        missing_base = self.tmp / "not-created-yet" / "runs"
+        runner = SkillRunner(base_working_dir=missing_base)
+        pkg = _package(self.tmp, SKILL_HAPPY, _manifest())
+
+        result = runner.run(_manifest(), pkg, {}, {})
+
+        self.assertTrue(result.ok)
+        self.assertTrue(missing_base.is_dir())
 
     def test_working_dir_is_isolated_per_run(self):
         pkg = _package(self.tmp, SKILL_HAPPY, _manifest())
@@ -81,15 +105,28 @@ class IsolatedRunnerTests(unittest.TestCase):
         self.assertEqual(result.error, "timeout")
         self.assertFalse(result.verified)
 
-    def test_env_is_stripped_but_secrets_are_injected(self):
+    def test_env_is_stripped_and_returned_secrets_are_redacted(self):
         pkg = _package(self.tmp, SKILL_SECRET, _manifest())
         result = self.runner.run(_manifest(), pkg, {}, {"demo_key": "sekret"})
         self.assertTrue(result.ok)
-        self.assertEqual(result.output["secret"], "sekret")
-        self.assertFalse(result.output["env_leak"])  # global env NOT accessible
+        self.assertEqual(result.output["secret"], "[REDACTED]")
+        self.assertEqual(result.output["nested"]["message"], "value=[REDACTED]")
+        self.assertFalse(result.output["env_leak"])
+        self.assertNotIn("sekret", repr(result.output))
+
+    def test_secret_in_crash_message_is_redacted(self):
+        pkg = _package(self.tmp, SKILL_SECRET_CRASH, _manifest())
+        result = self.runner.run(_manifest(), pkg, {}, {"demo_key": "sekret"})
+        self.assertFalse(result.ok)
+        self.assertIn("[REDACTED]", result.error or "")
+        self.assertNotIn("sekret", result.error or "")
 
     def test_crashing_skill_returns_failure(self):
-        pkg = _package(self.tmp, "raise ValueError('boom')\n\ndef run(context):\n    return {}\n", _manifest())
+        pkg = _package(
+            self.tmp,
+            "raise ValueError('boom')\n\ndef run(context):\n    return {}\n",
+            _manifest(),
+        )
         result = self.runner.run(_manifest(), pkg, {}, {})
         self.assertFalse(result.ok)
         self.assertIn("boom", (result.error or ""))
@@ -98,7 +135,7 @@ class IsolatedRunnerTests(unittest.TestCase):
 class DiagnosticsTests(unittest.TestCase):
     def test_explains_unregistered_skill(self):
         reasons = explain_skill(SkillRegistry(), "ghost")
-        self.assertTrue(any("not registered" in r for r in reasons))
+        self.assertTrue(any("not registered" in reason for reason in reasons))
 
     def test_explains_validation_and_state(self):
         registry = SkillRegistry()
@@ -107,7 +144,8 @@ class DiagnosticsTests(unittest.TestCase):
         registry.transition("demo-skill", "tested")
         registry.transition("demo-skill", "awaiting_approval")
         reasons = explain_skill(
-            registry, "demo-skill",
+            registry,
+            "demo-skill",
             validator_problems=["missing tests/test_*.py"],
             missing_capabilities=["network"],
         )
@@ -122,7 +160,7 @@ class DiagnosticsTests(unittest.TestCase):
         for state in ("validating", "tested", "awaiting_approval", "active"):
             registry.transition("demo-skill", state)
         reasons = explain_skill(registry, "demo-skill", runner_error="timeout")
-        self.assertTrue(any("timeout" in r for r in reasons))
+        self.assertTrue(any("timeout" in reason for reason in reasons))
 
     def test_no_blockers_when_active(self):
         registry = SkillRegistry()
