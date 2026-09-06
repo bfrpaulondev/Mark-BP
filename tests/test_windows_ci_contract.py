@@ -37,9 +37,11 @@ class WindowsCIContractTests(unittest.TestCase):
     def test_compile_gate_covers_canonical_entrypoint_and_packages(self):
         compile_line = (
             "python -m compileall -q actions config core dashboard memory plugins "
-            "scripts ui antonella.py main.py ui.py setup.py"
+            "scripts ui antonella.py main.py setup.py"
         )
         self.assertGreaterEqual(self.workflow.count(compile_line), 2)
+        # B4: the legacy module is removed and must not be compiled again.
+        self.assertNotIn("ui.py", self.workflow)
 
     def test_import_smoke_is_wired_and_utf8_is_pinned(self):
         windows_block = self.workflow.split("windows-baseline:", 1)[1]
