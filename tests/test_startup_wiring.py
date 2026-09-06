@@ -18,7 +18,29 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import sys
+import types
+
+
+def _shim(name: str) -> None:
+    """Insert a permissive stub module so `import name` succeeds."""
+    if name in sys.modules:
+        return
+    module = types.ModuleType(name)
+    module.__path__ = []  # mark as package so submodule imports fail loudly
+    sys.modules[name] = module
+
+
 try:
+    # main.py pulls the whole runtime stack at module level. Shim the
+    # third-party imports the Qt CI job does not provide; everything
+    # first-party runs for real.
+    for _name in ("sounddevice", "google", "google.genai", "google.genai.types"):
+        if _name not in sys.modules:
+            try:
+                __import__(_name)
+            except ImportError:
+                _shim(_name)
     from ui import AntonellaUI  # proves the ui facade imports
 
     HAS_RUNTIME = True
