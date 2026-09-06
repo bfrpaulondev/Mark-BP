@@ -366,7 +366,7 @@ class DropZone(QFrame):
         self.setMinimumHeight(90)
         self.setStyleSheet(
             f"QFrame#dropZone{{background:{Palette.SURFACE};border:1px dashed {Palette.BORDER_HOVER};"
-            "border-radius:12px;}}"
+            "border-radius:12px;"
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
@@ -462,6 +462,12 @@ class AntonellaWindow(QMainWindow):
         root.addLayout(body, stretch=1)
 
         root.addLayout(self._build_command_bar())
+
+        # Q3: keyboard order is set only after every widget shares the
+        # same window (setCentralWidget above) — QWidget.setTabOrder
+        # warns when first/second live in different windows.
+        QWidget.setTabOrder(self._input, self._interrupt_button)
+        QWidget.setTabOrder(self._interrupt_button, self._mic_button)
 
         self._log_signal.connect(self._log.append_event)
         self._state_signal.connect(self._apply_state)
@@ -613,7 +619,7 @@ class AntonellaWindow(QMainWindow):
         log_card.setObjectName("logCard")
         log_card.setStyleSheet(
             f"QFrame#logCard{{background:{Palette.SURFACE};border:1px solid {Palette.BORDER};"
-            "border-radius:12px;}}"
+            "border-radius:12px;"
         )
         log_layout = QVBoxLayout(log_card)
         log_layout.setContentsMargins(14, 12, 14, 12)
@@ -664,10 +670,6 @@ class AntonellaWindow(QMainWindow):
         self._mic_button.setToolTip("Pausar/retomar microfone · F4")
         self._mic_button.clicked.connect(self._toggle_mute)
         row.addWidget(self._mic_button)
-
-        # Keyboard order follows the visual row: command → interrupt → mic.
-        QWidget.setTabOrder(self._input, self._interrupt_button)
-        QWidget.setTabOrder(self._interrupt_button, self._mic_button)
         return row
 
     def showEvent(self, event) -> None:
@@ -759,7 +761,7 @@ class AntonellaWindow(QMainWindow):
             self._mic_button.setText("×")
             self._mic_button.setStyleSheet(
                 f"QPushButton{{background:#24111a;color:{Palette.RED};border:1px solid #4d2635;"
-                "border-radius:11px;font-weight:700;}}"
+                "border-radius:11px;font-weight:700;}"
             )
         elif not self._muted:
             self._mic_button.setText("◉")

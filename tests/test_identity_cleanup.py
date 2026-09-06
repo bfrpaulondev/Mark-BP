@@ -11,10 +11,9 @@ class IdentityCleanupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.live_ui = (ROOT / "ui" / "__init__.py").read_text(encoding="utf-8")
-        cls.legacy_ui = (ROOT / "ui.py").read_text(encoding="utf-8")
 
-    def test_dead_legacy_ui_has_no_mark_li_titles(self):
-        self.assertNotIn("MARK LI", self.legacy_ui)
+    def test_legacy_ui_module_is_removed(self):
+        self.assertFalse((ROOT / "ui.py").exists())
 
     def test_logview_masks_exact_legacy_product_token(self):
         self.assertIn('.replace("MARK LI", self.assistant_name)', self.live_ui)

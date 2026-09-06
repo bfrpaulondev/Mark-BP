@@ -58,3 +58,27 @@ integrada com as correcções do Principal Agent (`ApprovalButton` incluído).
   quando a janela está invisível.
 - Fatias futuras: redimensionamento fino por conteúdo, acessibilidade de
   contraste e mais cobertura de visual regression.
+
+## Q4 — Warning `SetProcessDpiAwarenessContext() failed: Acesso negado` (2026-09-06)
+
+Observado fisicamente no Windows. Estado da investigação:
+
+- Este warning é compatível com o caso em que o Qt tenta definir
+  `PER_MONITOR_AWARE_V2` depois de o processo já ter um contexto de DPI
+  awareness definido; o Windows pode negar uma segunda definição. No
+  projecto existem também chamadas thread-local a
+  `SetThreadDpiAwarenessContext` para obter coordenadas físicas, mas isso
+  por si só não prova qual componente definiu primeiro o contexto do
+  processo.
+- O arranque continuou depois do warning, portanto ele é **não fatal no
+  cenário observado**. Ainda não existe evidência física suficiente para
+  classificá-lo como puramente cosmético nem para afirmar que rendering e
+  scaling estão correctos em 100/125/150%, monitores mistos ou coordenadas
+  negativas.
+- Decisão: **não** forçar nem suprimir configuração DPI apenas para remover
+  o warning. Uma alteração dessas só deve acontecer se a matriz física do
+  ANT-275 demonstrar geometria/rendering incorrectos.
+- Follow-up físico: validar 100%, 125%, 150%, dois monitores com DPI
+  diferentes, monitor à esquerda/coordenadas negativas e reconexão. Se
+  esses cenários forem correctos, o warning pode ser tratado como ruído de
+  inicialização; se não, deve ser corrigida a origem real do awareness.
