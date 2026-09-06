@@ -49,7 +49,14 @@ class AntonellaLive(AntonellaRuntime):
         self.memory_stack = create_memory_stack()
         self.memory_bridge = MemoryCommandBridge(
             self.memory_stack.service,
+            owner_id=self.memory_stack.owner_id,
+            backend=self.memory_stack.backend,
+            persistent=self.memory_stack.persistent,
             log=lambda text: self.ui.write_log(f"SYS: memória · {text}"),
+        )
+        self.ui.write_log(
+            f"SYS: Memory backend: {self.memory_stack.backend}; "
+            f"status: {self.memory_stack.status}; persistent: {self.memory_stack.persistent}"
         )
         self._agent_orchestrator = AgentOrchestrator(
             requires_postcondition=requires_postcondition,

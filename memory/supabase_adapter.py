@@ -15,6 +15,10 @@ and a real PostgREST response have the same semantics.
 from __future__ import annotations
 
 import os
+import base64
+import json
+from uuid import UUID
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,22 +42,95 @@ class SupabaseConfigurationError(RuntimeError):
     """Raised when Supabase env configuration is missing — never guess."""
 
 
-def client_from_env() -> Any:
-    """Build a supabase client strictly from environment variables."""
-    url = os.environ.get(ENV_URL)
-    key = os.environ.get(ENV_KEY)
-    if not url or not key:
-        raise SupabaseConfigurationError(
-            f"missing Supabase configuration: set {ENV_URL} and {ENV_KEY}"
-        )
+ENV_ACCESS_TOKEN = "ANTONELLA_SUPABASE_ACCESS_TOKEN"
+ENV_REFRESH_TOKEN = "ANTONELLA_SUPABASE_REFRESH_TOKEN"
+ENV_FIELDS = (ENV_URL, ENV_KEY, ENV_ACCESS_TOKEN, ENV_REFRESH_TOKEN)
+
+
+# -.-.-.-
+def _jwt_claims(token: str) -> dict:
+    """Inspect token shape only; authorization always requires server validation."""
+    try:
+        encoded = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        if not isinstance(claims, dict):
+            raise ValueError()
+        return claims
+    except (ValueError, IndexError, UnicodeError):
+        raise SupabaseConfigurationError("Invalid Supabase token format") from None
+
+
+# -.-.-.-
+def authenticated_owner_id(client: Any) -> str:
+    """Bind the Data API session to a UUID validated by Supabase Auth."""
+    session = client.auth.get_session()
+    token = str(getattr(session, "access_token", "") or "")
+    claims = _jwt_claims(token)
+    if claims.get("role") != "authenticated":
+        raise SupabaseConfigurationError("An authenticated user session is required")
+    # get_user validates JWT with the Auth server; local JWT claims are not proof.
+    response = client.auth.get_user(token)
+    user = getattr(response, "user", None)
+    try:
+        owner = str(UUID(str(getattr(user, "id", ""))))
+        subject = str(UUID(str(claims.get("sub", ""))))
+    except ValueError:
+        raise SupabaseConfigurationError("Authenticated owner must be a UUID") from None
+    if owner != subject or getattr(user, "is_anonymous", False):
+        raise SupabaseConfigurationError("A stable authenticated owner is required")
+    return owner
+
+
+# -.-.-.-
+def client_from_env(*, env: Any = None, prefix: str = "ANTONELLA_SUPABASE") -> Any:
+    """Build a desktop-safe user client; never accept privileged API keys.
+
+    Session credentials come from the environment, never persisted by this
+    module. Missing/partial/auth failures cannot silently enable persistence.
+    """
+    values = os.environ if env is None else env
+    url, key, access, refresh = (
+        str(values.get(f"{prefix}_{suffix}") or "").strip()
+        for suffix in ("URL", "KEY", "ACCESS_TOKEN", "REFRESH_TOKEN")
+    )
+    if not all((url, key, access, refresh)):
+        raise SupabaseConfigurationError("Supabase URL, public key and user session are required")
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise SupabaseConfigurationError("Supabase requires an HTTPS project URL")
+    if not key.startswith("sb_publishable_"):
+        if key.startswith("sb_secret_") or _jwt_claims(key).get("role") != "anon":
+            raise SupabaseConfigurationError("Privileged Supabase keys are forbidden on desktop")
+    if _jwt_claims(access).get("role") != "authenticated":
+        raise SupabaseConfigurationError("An authenticated user access token is required")
     try:
         from supabase import create_client  # optional dependency
+    except ImportError:
+        raise SupabaseConfigurationError("Optional supabase package is unavailable") from None
+    try:
+        client = create_client(url, key)
+        client.auth.set_session(access, refresh)
+        authenticated_owner_id(client)
+        return client
+    except Exception:
+        # No provider messages, URLs, tokens or response bodies cross this boundary.
+        raise SupabaseConfigurationError("Supabase authenticated session initialization failed") from None
 
-        return create_client(url, key)
-    except ImportError as exc:
-        raise SupabaseConfigurationError(
-            "supabase package not installed; install it or inject a client"
-        ) from exc
+
+# -.-.-.-
+def verify_memory_schema(client: Any, owner_id: str) -> None:
+    """Check the exposed schema required by 0001 + 0005 without applying SQL.
+
+    Column/table availability does not prove RLS, indexes or migration history.
+    Actual owner isolation requires the separate two-session validator.
+    """
+    columns = {
+        "memories": "id,owner_id,project_id,type,state,title,content,summary,source_kind,source_ref,confidence,sensitivity,subject,valid_from,expires_at,version,supersedes_id,conflict_with_id,created_at,approved_at,updated_at,archived_at,metadata",
+        "memory_relations": "id,owner_id,from_memory,to_memory,relation,created_at",
+        "memory_feedback": "id,owner_id,memory_id,helpful,note,created_at",
+    }
+    for table, fields in columns.items():
+        client.table(table).select(fields).eq("owner_id", owner_id).limit(1).execute()
 
 
 # -.-.-.-
@@ -114,8 +191,15 @@ def _payload_for_db(record: MemoryRecord) -> dict[str, Any]:
 
 
 class SupabaseMemoryRepository:
-    def __init__(self, client: Any):
+    def __init__(self, client: Any, *, owner_id: str | None = None):
         self._client = client
+        self._owner_id = owner_id
+
+    # -.-.-.-
+    def _ensure_owner(self, owner_id: str) -> None:
+        if self._owner_id is not None:
+            if owner_id != self._owner_id or authenticated_owner_id(self._client) != self._owner_id:
+                raise SupabaseConfigurationError("Memory owner/session mismatch")
 
     # -.-.-.-
     def _record_from_row(self, row: dict[str, Any]) -> MemoryRecord:
@@ -149,10 +233,12 @@ class SupabaseMemoryRepository:
 
     # -.-.-.-
     def save(self, record: MemoryRecord) -> None:
+        self._ensure_owner(record.owner_id)
         self._client.table(TABLE).upsert(_payload_for_db(record)).execute()
 
     # -.-.-.-
     def get(self, record_id: str, owner_id: str) -> MemoryRecord | None:
+        self._ensure_owner(owner_id)
         response = (
             self._client.table(TABLE)
             .select("*")
@@ -169,6 +255,7 @@ class SupabaseMemoryRepository:
         """Server-side owner/state/type filters; lexical narrowing and
         expiry happen here (deterministically) like the in-memory store.
         Row cap keeps the context budget honest (D17)."""
+        self._ensure_owner(query.owner_id)
         builder = self._client.table(TABLE).select("*").eq("owner_id", query.owner_id)
         if query.project_id is not None:
             builder = builder.eq("project_id", query.project_id)

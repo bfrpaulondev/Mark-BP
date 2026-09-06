@@ -1,16 +1,12 @@
-"""Supabase memory validator (ANT-276 PRIOR. 7).
+"""Validate authenticated Supabase memory with synthetic rows only.
 
-One command to validate a real Supabase project end-to-end:
-
-    python scripts/validate_supabase_memory.py
-
-Steps: env check -> connectivity -> synthetic insert -> read-back ->
-supersede -> cleanup -> report. Only SYNTHETIC data with a test owner
-is created and ALWAYS cleaned up. The key is never printed. Missing
-env -> NOT CONFIGURED (exit 0, no crash). Migrations are never applied
-from here.
+Requires ANTONELLA_SUPABASE_{URL,KEY,ACCESS_TOKEN,REFRESH_TOKEN}.
+KEY must be publishable/legacy anon, never service-role. For an actual
+cross-owner RLS check, provide a second distinct user with the same fields
+under ANTONELLA_SUPABASE_TEST_B. No migrations are applied. Schema checks
+cover the 0001/0005 exposed column contract, not migration history/indexes.
+Every planned synthetic ID is tracked before writes and cleaned in finally.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -22,146 +18,152 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from memory.domain import MemoryRecord, MemoryState, MemoryType
+from memory.service import MemoryService
+from memory.supabase_adapter import (ENV_FIELDS, SupabaseMemoryRepository,
+    authenticated_owner_id, client_from_env, verify_memory_schema)
 
-ENV_URL = "ANTONELLA_SUPABASE_URL"
-ENV_KEY = "ANTONELLA_SUPABASE_KEY"
-TEST_OWNER = "00000000-0000-0000-0000-00000000e2e1"
+
+# -.-.-.-
+def validate() -> dict:
+    report = {"status": "NOT CONFIGURED", "steps": [], "rls": "NOT TESTED",
+              "migration_history_and_indexes": "NOT TESTED"}
+    if not any(name in os.environ for name in ENV_FIELDS):
+        return report
+    steps = report["steps"]
+    cleanup_targets = []
+
+    def step(name, action):
+        try:
+            action()
+            steps.append({"step": name, "status": "PASS"})
+        except Exception as error:
+            # Provider text can contain tokens/URLs/row contents; never echo it.
+            steps.append({"step": name, "status": "FAIL", "error_type": type(error).__name__})
+            raise
+
+    def prepare(prefix):
+        client = client_from_env(prefix=prefix)
+        owner = authenticated_owner_id(client)
+        verify_memory_schema(client, owner)
+        return client, owner, SupabaseMemoryRepository(client, owner_id=owner)
+
+    def synthetic(client, owner, repo):
+        now = time.time()
+        row = MemoryRecord(id=str(uuid.uuid4()), owner_id=owner, type=MemoryType.SEMANTIC,
+            title="Antonella validation (synthetic)", content="Synthetic validation only",
+            source_kind="runtime", subject="validation-" + uuid.uuid4().hex,
+            created_at=now, updated_at=now)
+        cleanup_targets.append((client, owner, row.id))
+        repo.save(row)
+        if repo.get(row.id, owner).content != row.content:
+            raise RuntimeError("Synthetic read-back mismatch")
+        return row
+
+    try:
+        client, owner, repo = prepare("ANTONELLA_SUPABASE")
+        steps.append({"step": "authenticated-session-and-schema-0001-0005", "status": "PASS"})
+        row = synthetic(client, owner, repo)
+        steps.append({"step": "insert-read-back", "status": "PASS"})
+        service = MemoryService(repo)
+        step("approve", lambda: service.approve(row.id, owner_id=owner))
+        replacement = row.with_(id=str(uuid.uuid4()), version=2, supersedes_id=row.id,
+                               content="Synthetic replacement", state=MemoryState.PROPOSED)
+        cleanup_targets.append((client, owner, replacement.id))
+
+        def supersede():
+            repo.save(replacement)
+            service.approve(replacement.id, owner_id=owner)
+            if repo.get(row.id, owner).state != MemoryState.SUPERSEDED:
+                raise RuntimeError("Supersession failed")
+            if repo.get(replacement.id, owner).state != MemoryState.ACTIVE:
+                raise RuntimeError("Replacement not active")
+        step("supersede-read-back", supersede)
+
+        def archive():
+            service.archive(replacement.id, owner_id=owner)
+            loaded = repo.get(replacement.id, owner)
+            if loaded.state != MemoryState.ARCHIVED or loaded.archived_at is None:
+                raise RuntimeError("Archive read-back failed")
+        step("archive-read-back", archive)
+
+        prefix = "ANTONELLA_SUPABASE_TEST_B"
+        if any(f"{prefix}_{suffix}" in os.environ for suffix in ("URL", "KEY", "ACCESS_TOKEN", "REFRESH_TOKEN")):
+            if os.environ.get(prefix + "_URL", "").rstrip('/') != os.environ.get(ENV_FIELDS[0], "").rstrip('/'):
+                raise RuntimeError("RLS fixtures must use the same project")
+            other_client, other_owner, other_repo = prepare(prefix)
+            if owner == other_owner:
+                raise RuntimeError("RLS fixtures require distinct authenticated users")
+            other_row = synthetic(other_client, other_owner, other_repo)
+
+            def cross_owner_checks(attacker, victim_owner, victim_row):
+                # Use raw Data API calls: client-side owner filters are not an RLS proof.
+                for operation in ("select", "update", "delete"):
+                    query = attacker.table("memories")
+                    if operation == "select": query = query.select("id")
+                    elif operation == "update": query = query.update({"title": "RLS violation (synthetic)"})
+                    else: query = query.delete()
+                    response = query.eq("id", victim_row.id).execute()
+                    if getattr(response, "data", None):
+                        raise RuntimeError("Cross-owner access was allowed")
+                forged_id = str(uuid.uuid4())
+                victim_client = client if victim_owner == owner else other_client
+                cleanup_targets.append((victim_client, victim_owner, forged_id))
+                try:
+                    attacker.table("memories").insert({"id": forged_id, "owner_id": victim_owner,
+                        "type": "semantic", "title": "RLS synthetic", "content": "Synthetic only",
+                        "source_kind": "runtime"}).execute()
+                except Exception as error:
+                    # Only an authorization rejection is evidence, never a timeout/schema error.
+                    if str(getattr(error, "code", "")) != "42501":
+                        raise RuntimeError("RLS insert rejection was not an authorization error") from None
+                else:
+                    raise RuntimeError("Cross-owner insert was allowed")
+
+            step("memories-rls-A-to-B", lambda: cross_owner_checks(client, other_owner, other_row))
+            step("memories-rls-B-to-A", lambda: cross_owner_checks(other_client, owner, row))
+            # Verify denied updates/deletes did not silently affect either fixture.
+            if repo.get(row.id, owner).title != row.title or other_repo.get(other_row.id, other_owner).title != other_row.title:
+                raise RuntimeError("Cross-owner operations mutated a fixture")
+            report["rls"] = "PASS: memories cross-owner CRUD with two authenticated users"
+        else:
+            steps.append({"step": "two-user-rls", "status": "NOT TESTED"})
+        report["status"] = "PASS"
+    except Exception as error:
+        report["status"] = "FAIL"
+        if not steps or steps[-1]["status"] != "FAIL":
+            steps.append({"step": "validation", "status": "FAIL", "error_type": type(error).__name__})
+    finally:
+        # Replacements are removed before their parents; failed writes are also tracked.
+        for target_client, target_owner, target_id in reversed(cleanup_targets):
+            try:
+                target_client.table("memories").delete().eq("id", target_id).eq("owner_id", target_owner).execute()
+                remaining = target_client.table("memories").select("id").eq("id", target_id).eq("owner_id", target_owner).execute()
+                if getattr(remaining, "data", None):
+                    raise RuntimeError("Synthetic cleanup did not remove the row")
+                steps.append({"step": "cleanup-read-back", "status": "PASS"})
+            except Exception as error:
+                report["status"] = "FAIL"
+                steps.append({"step": "cleanup-read-back", "status": "FAIL", "error_type": type(error).__name__})
+    return report
 
 
+# -.-.-.-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default="windows_e2e_reports/supabase_validation.json")
     args = parser.parse_args()
-
-    url = os.environ.get(ENV_URL)
-    key = os.environ.get(ENV_KEY)
-    if not url or not key:
-        print("NOT CONFIGURED — defina ANTONELLA_SUPABASE_URL e ANTONELLA_SUPABASE_KEY.")
-        print("A key nunca é impressa.")
-        return 0
-
-    steps: list[dict] = []
-
-    def step(name: str, fn) -> None:
-        try:
-            detail = fn() or {}
-            steps.append({"step": name, "status": "PASS", **detail})
-            print(f"PASS {name} {detail if detail else ''}")
-        except Exception as exc:  # noqa: BLE001 - report, don't crash
-            steps.append(
-                {"step": name, "status": "FAIL", "error": f"{type(exc).__name__}: {exc}"}
-            )
-            print(f"FAIL {name}: {type(exc).__name__}: {exc}")
-
-    client = None
-
-    def connect():
-        nonlocal client
-        from memory.supabase_adapter import client_from_env
-
-        client = client_from_env()
-        return None
-
-    created_ids: list[str] = []
-
-    def insert_synthetic():
-        payload = {
-            "owner_id": TEST_OWNER,
-            "type": "semantic",
-            "state": "active",
-            "title": "Antonella validation (synthetic)",
-            "content": "memória sintética de validação — safe to delete",
-            "summary": "",
-            "source_kind": "runtime",
-            "confidence": 0.5,
-            "subject": "antonella-validation",
-            "version": 1,
-            "created_at": time.time(),
-            "updated_at": time.time(),
-        }
-        response = client.table("memories").insert(payload).execute()
-        rows = getattr(response, "data", None) or []
-        if not rows:
-            raise RuntimeError("insert returned no data (verificar RLS/migrations)")
-        created_ids.append(rows[0]["id"])
-        return {"id": rows[0]["id"]}
-
-    def read_back():
-        if not created_ids:
-            raise RuntimeError("nothing inserted yet")
-        record_id = created_ids[0]
-        response = client.table("memories").select("*").eq("id", record_id).limit(1).execute()
-        rows = getattr(response, "data", None) or []
-        if not rows or rows[0]["content"] != "memória sintética de validação — safe to delete":
-            raise RuntimeError("read-back mismatch")
-        return None
-
-    def supersede():
-        if not created_ids:
-            raise RuntimeError("nothing to supersede")
-        response = (
-            client.table("memories")
-            .insert({
-                "owner_id": TEST_OWNER,
-                "type": "semantic",
-                "state": "proposed",
-                "title": "Antonella validation v2 (synthetic)",
-                "content": "versão 2 sintética",
-                "source_kind": "runtime",
-                "confidence": 0.5,
-                "subject": "antonella-validation",
-                "version": 2,
-                "supersedes_id": created_ids[0],
-                "created_at": time.time(),
-                "updated_at": time.time(),
-            })
-            .execute()
-        )
-        rows = getattr(response, "data", None) or []
-        if not rows:
-            raise RuntimeError("supersede insert returned no data")
-        created_ids.append(rows[0]["id"])
-        return {"id": rows[0]["id"]}
-
-    def owner_isolation_scan():
-        # Informational with the service key (RLS bypasses it); with a
-        # user key the RLS policies would make cross-owner rows vanish.
-        response = (
-            client.table("memories")
-            .select("id")
-            .eq("owner_id", TEST_OWNER)
-            .eq("subject", "antonella-validation")
-            .execute()
-        )
-        return {"rows": len(getattr(response, "data", None) or [])}
-
-    def cleanup():
-        removed = 0
-        for target in list(created_ids):
-            client.table("memories").delete().eq("id", target).execute()
-            removed += 1
-        return {"removed": removed}
-
-    step("env", lambda: {"url_configured": bool(url)})
-    step("connectivity", connect)
-    if client is None:
-        print("connectivity falhou — passos seguintes omitidos.")
-    else:
-        step("insert-synthetic", insert_synthetic)
-        step("read-back", read_back)
-        step("supersede", supersede)
-        step("owner-isolation-scan", owner_isolation_scan)
-        step("cleanup", cleanup)
-
-    failed = [s for s in steps if s["status"] == "FAIL"]
-    out = Path(__file__).resolve().parents[1] / "windows_e2e_reports"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "supabase_validation.json").write_text(
-        json.dumps(steps, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    print(f"\nrelatório: {out / 'supabase_validation.json'}")
-    print("NOT PRODUCTION VALIDATED — nunca aplicar migrations a partir daqui.")
-    return 1 if failed else 0
+    report = validate()
+    output = Path(args.output)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        print("FAIL: validation report could not be written")
+        return 1
+    print(f"Supabase validation: {report['status']}; RLS: {report['rls']}")
+    print("Migration history/indexes and child-table RLS: NOT TESTED; no migrations applied")
+    return 1 if report["status"] == "FAIL" else 0
 
 
 if __name__ == "__main__":

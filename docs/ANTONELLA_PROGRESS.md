@@ -133,3 +133,25 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 3. ANT-263 — Provider Router completo;
 4. ANT-264–267 — custo/Computer Use/ScreenConnect;
 5. ANT-268+ — UI/voz/observabilidade/E2E/memória.
+
+### Revisão #76 — autenticação e wiring de memória (2026-09-06)
+
+Preservados os commits do Principal sobre comandos, aprovações, hábitos e
+instrumentação única. Bootstrap usa contrato de ambiente explícito; sem
+configuração o backend é InMemory, identificado como memória da sessão.
+Qualquer configuração Supabase parcial/inválida ou falha de auth/schema/rede
+produz CONFIGURED BUT FAILED, sem repository/service nem fallback silencioso.
+Falhas posteriores são comunicadas sem afirmar sucesso nem trocar de backend.
+
+Persistência exige chave pública (publishable/anon) + access/refresh tokens
+de utilizador. O owner UUID vem de `auth.get_user()` validado no servidor e é
+vinculado ao repository; a identidade é revalidada nas operações. Service-role
+ou secret keys são recusadas no desktop. Não foram aplicadas migrations.
+
+O validador respeita `--output`, usa conversões de timestamps do adapter,
+verifica o contrato de colunas 0001/0005, testa archive/read-back e limpa IDs
+sintéticos conhecidos mesmo se a resposta de escrita falhar. RLS só recebe
+PASS para CRUD da tabela memories quando duas sessões distintas no mesmo
+projecto passam as verificações cruzadas. Uma só sessão fica NOT TESTED;
+histórico de migrations/índices e RLS das tabelas filhas continuam NOT TESTED.
+Chamadas Supabase/HTTP reais: NOT RUN. CI e HEAD final no próprio PR.

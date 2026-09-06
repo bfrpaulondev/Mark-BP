@@ -27,13 +27,17 @@ from tasks.proactivity import Observation, habit_stage, suggestion_allowed
 class MemoryCommandBridge:
     def __init__(
         self,
-        service: MemoryService,
+        service: MemoryService | None,
         *,
         owner_id: str = "local",
+        backend: str = "inmemory",
+        persistent: bool = False,
         log: Callable[[str], None] = lambda text: None,
         max_observations: int = 500,
         duplicate_window_seconds: float = 1.0,
     ):
+        self._backend = backend
+        self._persistent = persistent
         self._service = service
         self._owner_id = owner_id
         self._log = log
@@ -73,6 +77,24 @@ class MemoryCommandBridge:
         if command is None:
             return None
 
+        if self._service is None:
+            return {"intent": command.intent, "spoken": "A memória persistente está indisponível. Não guardei nem alterei memórias.",
+                    "requires_approval": False, "backend": "unavailable", "persistent": False,
+                    "status": "CONFIGURED BUT FAILED"}
+        try:
+            result = self._handle_command(command)
+        except Exception:
+            self._log("Memory backend operation failed; no ephemeral fallback was used.")
+            return {"intent": command.intent, "spoken": "Não consegui confirmar a operação de memória. Verifica a ligação antes de tentares novamente.",
+                    "requires_approval": False, "backend": self._backend,
+                    "persistent": self._persistent, "status": "OPERATION FAILED"}
+        result.update(backend=self._backend, persistent=self._persistent, status="READY")
+        if not self._persistent:
+            result["spoken"] = "Memória apenas desta sessão. " + result["spoken"]
+        return result
+
+    # -.-.-.-
+    def _handle_command(self, command) -> dict[str, Any]:
         service = self._service
 
         if command.intent == "learn_fact":

@@ -1,61 +1,47 @@
-"""Memory stack bootstrap (ANT-276 wiring R2).
-
-Chooses the memory repository for the runtime:
-
-- Supabase when ``ANTONELLA_SUPABASE_URL``/``KEY`` are set AND the
-  optional client builds successfully;
-- InMemory otherwise — Antonella NEVER breaks because Supabase is not
-  configured (fail-closed on configuration errors, then graceful
-  fallback with a reason).
-"""
-
+"""Memory bootstrap: optional when absent, fail closed when configured but broken."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
-from memory.repository import MemoryRepository
+from memory.repository import InMemoryMemoryRepository
 from memory.service import MemoryService
+from memory.supabase_adapter import (ENV_FIELDS, SupabaseMemoryRepository,
+    authenticated_owner_id, client_from_env, verify_memory_schema)
 
 
 @dataclass(frozen=True)
 class MemoryStack:
-    service: MemoryService
+    service: MemoryService | None
     repository: Any
-    backend: str          # "supabase" | "inmemory"
+    backend: str
     fallback_reason: str | None = None
+    owner_id: str = "local"
+    status: str = "NOT CONFIGURED"
+    persistent: bool = False
 
 
-def create_memory_stack(config: dict[str, Any] | None = None) -> MemoryStack:
-    """Build the runtime memory stack (R2).
+# -.-.-.-
+def create_memory_stack() -> MemoryStack:
+    """Environment is the explicit contract; no unused config argument.
 
-    Never raises for missing/invalid Supabase configuration: falls back
-    to InMemory and records the reason. Only programming errors bubble.
+    Any supplied Supabase field signals persistence intent, including partial
+    or whitespace configuration. Only fully absent configuration uses InMemory.
     """
-    from memory.repository import InMemoryMemoryRepository
-    from memory.service import MemoryService
-
-    repo: MemoryRepository = InMemoryMemoryRepository()
+    if not any(name in os.environ for name in ENV_FIELDS):
+        repo = InMemoryMemoryRepository()
+        return MemoryStack(MemoryService(repo), repo, "inmemory",
+                           "Supabase not configured; session-only memory")
     try:
-        from memory.supabase_adapter import (
-            SupabaseConfigurationError,
-            SupabaseMemoryRepository,
-            client_from_env,
-        )
-
-        try:
-            repo = SupabaseMemoryRepository(client_from_env())
-            return MemoryStack(
-                service=MemoryService(repo), repository=repo, backend="supabase"
-            )
-        except SupabaseConfigurationError as exc:
-            reason = str(exc)
-        except Exception as exc:  # noqa: BLE001 - any Supabase failure degrades safely
-            reason = f"supabase indisponível · {type(exc).__name__}: {exc}"
-    except ImportError as exc:  # pragma: no cover - supabase_adapter always imports
-        reason = str(exc)
-
-    service = MemoryService(repo)
-    return MemoryStack(
-        service=service, repository=repo, backend="inmemory", fallback_reason=reason
-    )
+        client = client_from_env()
+        owner_id = authenticated_owner_id(client)
+        verify_memory_schema(client, owner_id)
+        repo = SupabaseMemoryRepository(client, owner_id=owner_id)
+        return MemoryStack(MemoryService(repo), repo, "supabase",
+                           owner_id=owner_id, status="READY", persistent=True)
+    except Exception:
+        # Configured persistence failures must never become ephemeral writes.
+        return MemoryStack(None, None, "unavailable",
+                           "Configured Supabase failed; memory operations disabled",
+                           owner_id="", status="CONFIGURED BUT FAILED")
