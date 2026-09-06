@@ -60,6 +60,49 @@ class MemoryService:
         return float(self._clock())
 
     # -.-.-.-
+    @staticmethod
+    def _subject(record: MemoryRecord) -> str:
+        return (record.subject or record.title).strip().casefold()
+
+    # -.-.-.-
+    def _active_subject_matches(self, record: MemoryRecord) -> list[MemoryRecord]:
+        subject = self._subject(record)
+        return [
+            candidate
+            for candidate in self._repo.query(
+                MemoryQuery(
+                    owner_id=record.owner_id,
+                    project_id=record.project_id,
+                    state=MemoryState.ACTIVE,
+                )
+            )
+            if candidate.type == record.type and self._subject(candidate) == subject
+        ]
+
+    # -.-.-.-
+    def _validate_supersession_target(self, record: MemoryRecord) -> MemoryRecord:
+        """Fail closed if a supersession target is stale or unrelated.
+
+        A caller cannot retire an arbitrary memory by supplying its id. The
+        target must still be ACTIVE and must represent the same owner-scoped
+        project/type/subject at the moment of activation.
+        """
+        if not record.supersedes_id:
+            raise ValueError("supersession target is missing")
+        previous = self._repo.get(record.supersedes_id, record.owner_id)
+        if previous is None:
+            raise ValueError("supersession target does not exist for this owner")
+        if previous.state is not MemoryState.ACTIVE:
+            raise ValueError("supersession target is no longer active")
+        if previous.type != record.type:
+            raise ValueError("supersession target has a different memory type")
+        if previous.project_id != record.project_id:
+            raise ValueError("supersession target belongs to a different project")
+        if self._subject(previous) != self._subject(record):
+            raise ValueError("supersession target has a different subject")
+        return previous
+
+    # -.-.-.-
     def propose(
         self,
         *,
@@ -86,22 +129,21 @@ class MemoryService:
         silent overwrite.
         """
         now = self._now()
+        normalized_type = MemoryType(type_)
         normalized_subject = (subject or title).strip().casefold()
         conflict_with_id: str | None = None
         if supersedes_id is None:
             for record in self._repo.query(
                 MemoryQuery(owner_id=owner_id, project_id=project_id, state=MemoryState.ACTIVE)
             ):
-                if record.type == MemoryType(type_) and (
-                    record.subject or ""
-                ).strip().casefold() == normalized_subject:
+                if record.type == normalized_type and self._subject(record) == normalized_subject:
                     conflict_with_id = record.id
                     break
 
         record = MemoryRecord(
             id=uuid.uuid4().hex,
             owner_id=owner_id,
-            type=MemoryType(type_),
+            type=normalized_type,
             title=title,
             content=content,
             state=MemoryState.PROPOSED,
@@ -119,6 +161,8 @@ class MemoryService:
             sensitivity=sensitivity,
             version=version,
         )
+        if supersedes_id is not None:
+            self._validate_supersession_target(record)
         self._repo.save(record)
         return record
 
@@ -128,6 +172,8 @@ class MemoryService:
 
         M1: an unresolved conflict (``conflict_with_id`` set) can NEVER be
         approved normally — it must go through ``resolve_conflict`` first.
+        Approval also revalidates current active state so a stale proposal
+        cannot create two active memories for the same subject.
         """
         record = self._require(record_id, owner_id)
         if record.state is not MemoryState.PROPOSED:
@@ -137,13 +183,23 @@ class MemoryService:
                 "unresolved conflict: call resolve_conflict() before approval "
                 f"(conflicts with {record.conflict_with_id})"
             )
+
+        previous: MemoryRecord | None = None
+        if record.supersedes_id:
+            previous = self._validate_supersession_target(record)
+            unexpected = [
+                item for item in self._active_subject_matches(record) if item.id != previous.id
+            ]
+            if unexpected:
+                raise ValueError("memory subject changed while awaiting approval; review required")
+        elif self._active_subject_matches(record):
+            raise ValueError("memory subject became occupied while awaiting approval; review required")
+
         now = self._now()
         approved = record.with_(state=MemoryState.ACTIVE, approved_at=now, updated_at=now)
         self._repo.save(approved)
-        if approved.supersedes_id:
-            previous = self._repo.get(approved.supersedes_id, owner_id)
-            if previous is not None and previous.state is MemoryState.ACTIVE:
-                self._repo.save(previous.with_(state=MemoryState.SUPERSEDED, updated_at=now))
+        if previous is not None:
+            self._repo.save(previous.with_(state=MemoryState.SUPERSEDED, updated_at=now))
         return approved
 
     # -.-.-.-
@@ -160,7 +216,7 @@ class MemoryService:
           memory stays untouched; the decision is recorded in metadata);
         - replace_existing: converts the conflict into an explicit
           supersession — the proposal stays proposed and ``approve()``
-          then retires the old record.
+          then retires the old record after revalidating it.
         """
         if decision not in ("keep_existing", "replace_existing", "reject_new"):
             raise ValueError(f"unknown conflict decision: {decision}")
@@ -177,6 +233,7 @@ class MemoryService:
                 conflict_with_id=None,
                 updated_at=now,
             )
+            self._validate_supersession_target(resolved)
         else:
             resolved = record.with_(
                 state=MemoryState.ARCHIVED,
@@ -231,6 +288,8 @@ class MemoryService:
     ) -> MemoryRecord:
         """Explicit versioned supersession (D12/D15) — proposal, not auto."""
         record = self._require(record_id, owner_id)
+        if record.state is not MemoryState.ACTIVE:
+            raise ValueError("only active memories can be superseded")
         return self.propose(
             owner_id=owner_id,
             type_=record.type,
