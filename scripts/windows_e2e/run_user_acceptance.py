@@ -1,26 +1,28 @@
 """One-command Windows validation runner (ANT-275 E4/E5/E6).
 
-Single entry point for a physical session:
-  python scripts/windows_e2e/run_user_acceptance.py
+Physical usage from the repository root::
 
-1. machine capability probe;
-2. automated E2E suite (capability-gated executors);
-3. minimal interactive steps — the user records PASS/FAIL, or SKIPPED only
-   where the step explicitly permits it;
-4. final reports in windows_e2e_reports/: report.md, report.json,
-   user_acceptance.md.
+    $env:ANTONELLA_E2E_PHYSICAL="1"
+    python scripts/windows_e2e/run_user_acceptance.py
 
-Interactive results are the USER's verdict, recorded verbatim — never
-inferred. No voice content is recorded or written to reports: statuses only.
+The runner performs the capability-gated automated suite, launches Antonella
+for the interactive voice checks (unless ``--use-existing-antonella`` is
+supplied), records only PASS/FAIL/SKIPPED status for the user's voice verdicts,
+and writes the final reports to ``windows_e2e_reports/``.
+
+Without the explicit physical gate, automated cases remain NOT PHYSICALLY
+TESTED and interactive hardware checks are not started.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -78,7 +80,39 @@ INTERACTIVE_STEPS = (
 )
 
 
-def run_interactive(out_dir: Path) -> list[dict]:
+# -.-.-.-
+def _physical_gate(
+    environ: Mapping[str, str] | None = None,
+    platform: str | None = None,
+) -> bool:
+    values = os.environ if environ is None else environ
+    current_platform = sys.platform if platform is None else platform
+    return values.get("ANTONELLA_E2E_PHYSICAL") == "1" and current_platform == "win32"
+
+
+# -.-.-.-
+def _launch_antonella(root: Path) -> subprocess.Popen:
+    """Launch the canonical desktop entrypoint without a shell."""
+    return subprocess.Popen(
+        [sys.executable, str(root / "antonella.py")],
+        cwd=str(root),
+    )
+
+
+# -.-.-.-
+def _stop_launched(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+# -.-.-.-
+def run_interactive() -> list[dict]:
     records: list[dict] = []
     print("\n=== VALIDAÇÃO INTERACTIVA (o teu veredicto é o resultado) ===")
     for index, step in enumerate(INTERACTIVE_STEPS, start=1):
@@ -102,6 +136,76 @@ def run_interactive(out_dir: Path) -> list[dict]:
     return records
 
 
+# -.-.-.-
+def _voice_metrics_row(root: Path) -> dict:
+    metrics_path = root / "voice_metrics.json"
+    exists = metrics_path.is_file() and metrics_path.stat().st_size > 0
+    return {
+        "case_id": "voice-runtime-metrics",
+        "status": "PASS" if exists else "FAIL",
+        "timestamp": time.time(),
+        **({} if exists else {"reason": "voice_metrics.json was not produced"}),
+    }
+
+
+# -.-.-.-
+def _write_voice_benchmark(root: Path, out_dir: Path) -> None:
+    """Persist only the content-free benchmark stdout produced by A8."""
+    destination = out_dir / "voice_benchmark.txt"
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts" / "benchmark_voice.py"),
+                "--input",
+                str(root / "voice_metrics.json"),
+            ],
+            cwd=str(root),
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        if completed.returncode == 0:
+            destination.write_text(completed.stdout, encoding="utf-8")
+        else:
+            destination.write_text(
+                f"benchmark failed: returncode={completed.returncode}\n",
+                encoding="utf-8",
+            )
+    except Exception as exc:
+        destination.write_text(
+            f"benchmark unavailable: {type(exc).__name__}\n",
+            encoding="utf-8",
+        )
+
+
+# -.-.-.-
+def _write_acceptance(out_dir: Path, rows: list[dict], note: str | None = None) -> None:
+    acceptance_path = out_dir / "user_acceptance.md"
+    lines = [
+        "# Windows User Acceptance",
+        "",
+        "| Passo | Resultado |",
+        "|---|---|",
+    ]
+    for row in rows:
+        label = row["status"]
+        if row.get("reason"):
+            label += f" — {row['reason']}"
+        lines.append(f"| {row['case_id']} | {label} |")
+    if not rows:
+        lines.append("| (sem passos interactivos executados) | SKIPPED |")
+    lines.extend(
+        [
+            "",
+            note or "Passos interactivos são veredictos do utilizador; nunca inferidos.",
+        ]
+    )
+    acceptance_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# -.-.-.-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -109,9 +213,16 @@ def main() -> int:
         action="store_true",
         help="automated suite only",
     )
+    parser.add_argument(
+        "--use-existing-antonella",
+        action="store_true",
+        help="do not launch a second Antonella process for interactive voice checks",
+    )
     args = parser.parse_args()
 
-    out_dir = Path(__file__).resolve().parents[2] / "windows_e2e_reports"
+    root = Path(__file__).resolve().parents[2]
+    out_dir = root / "windows_e2e_reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
     capabilities = probe()
 
     print("=== CAPABILITIES (sem PII) ===")
@@ -129,10 +240,7 @@ def main() -> int:
         + (", ".join(key for key, value in optional.items() if value) or "(nenhuma)")
     )
 
-    physical_gate = (
-        os.environ.get("ANTONELLA_E2E_PHYSICAL") == "1"
-        and sys.platform == "win32"
-    )
+    physical_gate = _physical_gate()
     if not physical_gate:
         print(
             "\nNOT PHYSICALLY TESTED — para executar os casos físicos no Windows, "
@@ -143,26 +251,44 @@ def main() -> int:
     print("\n=== E2E AUTOMATIZADO CONCLUÍDO (report.md/report.json) ===")
 
     user_rows: list[dict] = []
-    if not args.skip_interactive:
-        user_rows = run_interactive(out_dir)
+    acceptance_note: str | None = None
+    launched: subprocess.Popen | None = None
 
-    acceptance_path = out_dir / "user_acceptance.md"
-    lines = [
-        "# Windows User Acceptance",
-        "",
-        "| Passo | Resultado |",
-        "|---|---|",
-    ]
-    for row in user_rows:
-        label = row["status"]
-        if row.get("reason"):
-            label += f" — {row['reason']}"
-        lines.append(f"| {row['case_id']} | {label} |")
-    if not user_rows:
-        lines.append("| (interactivos ignorados — --skip-interactive) | SKIPPED |")
-    lines.append("")
-    lines.append("Passos interactivos são veredictos do utilizador; nunca inferidos.")
-    acceptance_path.write_text("\n".join(lines), encoding="utf-8")
+    if args.skip_interactive:
+        acceptance_note = "Passos interactivos ignorados explicitamente por --skip-interactive."
+    elif not physical_gate:
+        acceptance_note = (
+            "NOT PHYSICALLY TESTED — passos interactivos não foram iniciados sem o gate físico."
+        )
+    else:
+        try:
+            if args.use_existing_antonella:
+                print(
+                    "\nUsando uma instância Antonella já aberta. "
+                    "Confirma que está pronta e com microfone/áudio disponíveis."
+                )
+            else:
+                launched = _launch_antonella(root)
+                print("\nAntonella iniciada pelo runner para a validação de voz.")
+
+            input("Quando a janela estiver pronta para voz, carrega ENTER para continuar: ")
+            if launched is not None and launched.poll() is not None:
+                user_rows.append(
+                    {
+                        "case_id": "antonella-launch",
+                        "status": "FAIL",
+                        "timestamp": time.time(),
+                        "reason": "Antonella process exited before interactive validation",
+                    }
+                )
+            else:
+                user_rows.extend(run_interactive())
+                user_rows.append(_voice_metrics_row(root))
+                _write_voice_benchmark(root, out_dir)
+        finally:
+            _stop_launched(launched)
+
+    _write_acceptance(out_dir, user_rows, acceptance_note)
 
     automated_failed = any(record.status == "FAIL" for record in bundle.records)
     interactive_failed = any(row["status"] == "FAIL" for row in user_rows)
