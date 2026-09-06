@@ -30,6 +30,7 @@ from ui.voice_feedback import local_command_feedback
 
 
 DEFAULT_VOICE = "Kore"
+LIVE_STARTUP_TIMEOUT_SECONDS = 20.0
 
 # Deterministic fast-path kinds that deserve a short spoken confirmation;
 # informational kinds (help/status/list) stay log-only.
@@ -44,6 +45,12 @@ class AntonellaLive(AntonellaRuntime):
     # -.-.-.-
     def __init__(self, ui: AntonellaUI):
         super().__init__(ui)
+        # The stabilized engine currently maps ``_enhanced_live=True`` to the
+        # obsolete v1alpha transport. Current Gemini Live documentation requires
+        # v1beta for the 2.5 native-audio affective/proactive feature family.
+        # Prefer a reliable plain v1beta session here until transport version and
+        # optional feature flags are decoupled in the base engine.
+        self._enhanced_live = False
         self._last_orchestration_event: OrchestrationEvent | None = None
         # R1/R2/R5: memory stack + natural command bridge + habit ladder.
         self.memory_stack = create_memory_stack()
@@ -58,12 +65,45 @@ class AntonellaLive(AntonellaRuntime):
             f"SYS: Memory backend: {self.memory_stack.backend}; "
             f"status: {self.memory_stack.status}; persistent: {self.memory_stack.persistent}"
         )
+        self.ui.write_log("SYS: Live transport: v1beta compatibility mode.")
         self._agent_orchestrator = AgentOrchestrator(
             requires_postcondition=requires_postcondition,
             capture_postcondition_state=capture_postcondition_state,
             verify_postcondition=verify_postcondition,
             event_sink=self._on_orchestration_event,
         )
+
+    # -.-.-.-
+    async def run(self) -> None:
+        """Run the legacy engine with a bounded Live-session startup watchdog."""
+        engine_task = asyncio.create_task(super().run(), name="antonella-live-engine")
+        try:
+            while not engine_task.done():
+                if self.session is None:
+                    try:
+                        async with asyncio.timeout(LIVE_STARTUP_TIMEOUT_SECONDS):
+                            while self.session is None and not engine_task.done():
+                                await asyncio.sleep(0.1)
+                    except TimeoutError:
+                        self.ui.write_log(
+                            "ERR: Live session startup timed out; cancelling the stalled "
+                            "connection and retrying."
+                        )
+                        self.ui.set_state("FAILED")
+                        # AntonellaRuntime catches cancellation at the connection
+                        # boundary, performs its bounded reconnect path and tries
+                        # again instead of leaving the UI stuck indefinitely.
+                        engine_task.cancel()
+                        await asyncio.sleep(0)
+                        continue
+
+                while self.session is not None and not engine_task.done():
+                    await asyncio.sleep(0.5)
+
+            await engine_task
+        finally:
+            if not engine_task.done():
+                engine_task.cancel()
 
     # -.-.-.-
     def _on_orchestration_event(self, event: OrchestrationEvent) -> None:
