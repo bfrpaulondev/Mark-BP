@@ -68,10 +68,11 @@ class TaskRunner:
     def _classify(self, step: TaskStep, outcome: Any) -> str:
         """T1: delivery is never verification.
 
-        Non-verifiable steps (plain {"ok": true}) may complete on ok.
         Verifiable outcomes (ExecutionResult or a dict carrying
-        delivered/verified) require delivered AND verified for "done";
-        delivered-but-unverified parks as awaiting_verification.
+        delivered/verified) require delivered AND verified for ``done``.
+        If the step contract itself requires verification, a legacy/plain
+        ``{"ok": true}`` outcome is insufficient and parks for verification
+        rather than silently completing.
         """
         if isinstance(outcome, ExecutionResult):
             if outcome.can_claim_success:
@@ -87,6 +88,8 @@ class TaskRunner:
             if outcome.get("ok") and outcome.get("delivered") and not outcome.get("verified"):
                 return "awaiting_verification"
             return "failed"
+        if step.requires_verification and outcome.get("ok"):
+            return "awaiting_verification"
         return "done" if outcome.get("ok") else "failed"
 
     # -.-.-.-
@@ -99,7 +102,6 @@ class TaskRunner:
             return True
         if self._approval_manager is None:
             return False
-        from core.human_approval import action_fingerprint  # keep tasks import-light
         from core.policy_engine import PolicyDecision, PolicyEffect
 
         decision = PolicyDecision(
@@ -110,6 +112,7 @@ class TaskRunner:
             reason=f"dangerous task step: {step.name}",
         )
         if self._approval_manager.consume_if_approved(step.name, step.action, decision):
+            task.approval_request_id = None
             return True
         request = self._approval_manager.request(step.name, step.action, decision)
         task.approval_request_id = request.request_id
@@ -192,7 +195,8 @@ class TaskRunner:
 
             if verdict == "done":
                 step.state = "done"
-                task.completed_keys.append(step.idempotency_key)
+                if step.idempotency_key not in task.completed_keys:
+                    task.completed_keys.append(step.idempotency_key)
                 self._persist(task)
             elif verdict == "awaiting_verification":
                 step.state = "awaiting_verification"
