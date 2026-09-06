@@ -133,3 +133,14 @@ Critério central: **quando consegue, prova; quando não consegue, sabe que não
 3. ANT-263 — Provider Router completo;
 4. ANT-264–267 — custo/Computer Use/ScreenConnect;
 5. ANT-268+ — UI/voz/observabilidade/E2E/memória.
+
+### Revisão #75 — providers (2026-09-06)
+
+Modelos Anthropic/Groq são explícitos por role (`anthropic_model_<role>` /
+`groq_model_<role>`); sem modelo não existe candidato. Auto preserva prioridade
+OpenAI/Gemini e inclui Groq/Anthropic como fallback; preferências dos novos
+providers também permitem fallback entre ambos. Cache inclui digests de keys
+e configurações de modelos dos quatro providers. Regressões cobrem cada
+role, auto com um único provider, retry/circuit/health, rotações de cache e
+exclusão de vision. Pricing desconhecido continua desconhecido; não há novos
+modelos ou preços por defeito. HTTP real: NOT RUN. CI/HEAD no próprio PR.

@@ -27,7 +27,10 @@ class _StubAdapter:
 def _router(adapters='__unset__', config=None, **kwargs) -> ProviderRouter:
     if adapters == '__unset__':
         return ProviderRouter(config or {}, **kwargs)
-    return ProviderRouter(config or {}, adapters=adapters, **kwargs)
+    return ProviderRouter(config if config is not None else {
+        f"{provider}_model_{role}": f"test-{provider}-{role}"
+        for provider in ("groq", "anthropic") for role in ("fast", "balanced")
+    }, adapters=adapters, **kwargs)
 
 
 class NewProviderWiringTests(unittest.TestCase):

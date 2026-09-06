@@ -261,27 +261,26 @@ class ProviderRouter:
         elif preferred == "gemini":
             order = (ProviderName.GEMINI, ProviderName.OPENAI, ProviderName.ANTHROPIC, ProviderName.GROQ)
         elif preferred == "anthropic":
-            order = (ProviderName.ANTHROPIC, ProviderName.OPENAI, ProviderName.GEMINI)
+            order = (ProviderName.ANTHROPIC, ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.GROQ)
         elif preferred == "groq":
-            order = (ProviderName.GROQ, ProviderName.OPENAI, ProviderName.GEMINI)
+            order = (ProviderName.GROQ, ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.ANTHROPIC)
         elif selected_role == ProviderRole.FAST:
-            order = (ProviderName.GEMINI, ProviderName.OPENAI)
+            order = (ProviderName.GEMINI, ProviderName.OPENAI, ProviderName.GROQ, ProviderName.ANTHROPIC)
         else:
-            order = (ProviderName.OPENAI, ProviderName.GEMINI)
+            order = (ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.GROQ, ProviderName.ANTHROPIC)
 
-        return tuple(
-            self._candidate_for(
-                provider=provider,
-                role=selected_role,
-                capability=selected_capability,
-            )
-            for provider in order
-            if provider in self._adapters
-            # G5: honest capabilities — text-only adapters are never
-            # selected for vision requests.
-            and not (selected_capability == ProviderCapability.VISION
-                     and provider in _TEXT_ONLY_PROVIDERS)
-        )
+        candidates = []
+        for provider in order:
+            if provider not in self._adapters:
+                continue
+            if (selected_capability == ProviderCapability.VISION
+                    and provider in _TEXT_ONLY_PROVIDERS):
+                continue
+            candidate = self._candidate_for(provider=provider, role=selected_role,
+                                            capability=selected_capability)
+            if candidate is not None:
+                candidates.append(candidate)
+        return tuple(candidates)
 
     # -.-.-.-
     def generate_text(
@@ -568,7 +567,7 @@ class ProviderRouter:
         provider: ProviderName,
         role: ProviderRole,
         capability: ProviderCapability,
-    ) -> ProviderCandidate:
+    ) -> ProviderCandidate | None:
         if provider == ProviderName.OPENAI:
             model_by_role = {
                 ProviderRole.FAST: str(
@@ -594,7 +593,7 @@ class ProviderRouter:
                 ProviderRole.CRITIC: "medium",
                 ProviderRole.VISION: "low",
             }
-        else:
+        elif provider == ProviderName.GEMINI:
             model_by_role = {
                 ProviderRole.FAST: str(
                     self._config.get("gemini_model_fast")
@@ -618,6 +617,16 @@ class ProviderRouter:
                 ).strip(),
             }
             effort_by_role = {item: "low" for item in ProviderRole}
+
+        else:
+            # Text-only providers have no guessed defaults or cross-provider models.
+            if capability == ProviderCapability.VISION:
+                return None
+            model = str(self._config.get(f"{provider.value}_model_{role.value}") or "").strip()
+            if not model:
+                return None
+            model_by_role = {role: model}
+            effort_by_role = {role: "low"}
 
         max_output_by_role = {
             ProviderRole.FAST: 4_000,
@@ -728,6 +737,10 @@ def _provider_config_signature(config: Mapping[str, Any]) -> str:
         "gemini_model_critic",
         "gemini_model_vision",
     )
+    relevant_names += tuple(
+        f"{provider.value}_model_{role.value}"
+        for provider in ProviderName for role in ProviderRole
+    )
     payload: dict[str, Any] = {
         name: str(config.get(name) or "")
         for name in relevant_names
@@ -736,7 +749,7 @@ def _provider_config_signature(config: Mapping[str, Any]) -> str:
     payload["model_pricing_usd_per_million_tokens"] = (
         pricing if isinstance(pricing, Mapping) else {}
     )
-    for secret_name in ("openai_api_key", "gemini_api_key"):
+    for secret_name in (f"{provider.value}_api_key" for provider in ProviderName):
         secret = str(config.get(secret_name) or "")
         payload[f"{secret_name}_digest"] = (
             hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else ""
