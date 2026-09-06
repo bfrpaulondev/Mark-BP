@@ -58,3 +58,21 @@ integrada com as correcções do Principal Agent (`ApprovalButton` incluído).
   quando a janela está invisível.
 - Fatias futuras: redimensionamento fino por conteúdo, acessibilidade de
   contraste e mais cobertura de visual regression.
+
+## Q4 — Warning `SetProcessDpiAwarenessContext() failed: Acesso negado` (2026-09-06)
+
+Observado fisicamente no Windows. Análise:
+
+- O warning ocorre quando o Qt tenta definir PER_MONITOR_AWARE_V2 mas o
+  processo **já tem** DPI awareness definido — o Windows nega a segunda
+  definição ("Acesso negado"). O awareness prévio pode vir do manifest da
+  app, de chamadas Windows anteriores ao QApplication, ou de componentes
+  que usam `SetThreadDpiAwarenessContext` (ex.: captura MSS).
+- Como a geometria/clamp multi-monitor funciona (fatia 1) e o rendering
+  está correcto, o awareness efectivo do processo já é o pretendido — o
+  warning é **cosmético**.
+- Decisão: **não** forçar configuração DPI adicional no Qt (não quebrar
+  multi-monitor por um warning); não suprimir o warning à força.
+- Follow-up de diagnóstico (opcional): identificar o componente que define
+  o awareness primeiro; se um dia o rendering físico mostrar DPI errado,
+  reavaliar com o harness físico (ANT-275) antes de alterar configuração.
