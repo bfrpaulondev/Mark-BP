@@ -4,8 +4,9 @@ Detects technical capabilities of the current machine WITHOUT collecting
 PII: booleans, versions and monitor geometry only. Never reports user
 names, full home paths or installed-software listings.
 
-Standard library only; optional integrations (pycaw, pywinauto, ...)
-are reported as availability flags, never imported at module level.
+Optional integrations are reported as availability flags. Hardware flags
+such as monitor count and microphone availability are based on an actual
+probe, not merely on an installed Python package.
 """
 
 from __future__ import annotations
@@ -32,88 +33,138 @@ def _windows_monitors() -> list[dict[str, Any]]:
     if sys.platform != "win32":
         return []
 
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.c_ulong),
+            ("rcMonitor", RECT),
+            ("rcWork", RECT),
+            ("dwFlags", ctypes.c_ulong),
+        ]
+
     monitors: list[dict[str, Any]] = []
+    user32 = ctypes.windll.user32
 
-    def _callback(_hdc: Any, _rect: Any, lparam: Any, hmonitor: Any) -> int:
-        info = ctypes.c_char(0)  # placeholder to keep ctypes callback shape simple
-        del info, lparam
-        # MONITORINFO via GetMonitorInfoW (geometry only)
-        class RECT(ctypes.Structure):
-            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
-                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+    # Win32 MONITORENUMPROC:
+    # BOOL CALLBACK MonitorEnumProc(HMONITOR, HDC, LPRECT, LPARAM)
+    MONITORENUMPROC = ctypes.WINFUNCTYPE(
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(RECT),
+        ctypes.c_void_p,
+    )
 
-        class MONITORINFO(ctypes.Structure):
-            _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", RECT),
-                        ("rcWork", RECT), ("dwFlags", ctypes.c_ulong)]
-
-        user32 = ctypes.windll.user32
-        mi = MONITORINFO()
-        mi.cbSize = ctypes.sizeof(MONITORINFO)
-        if user32.GetMonitorInfoW(hmonitor, ctypes.byref(mi)):
+    def _callback(
+        hmonitor: int,
+        _hdc: int,
+        _rect: ctypes.POINTER(RECT),
+        _lparam: int,
+    ) -> int:
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        if user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
             monitors.append(
                 {
-                    "primary": bool(mi.dwFlags & 1),
-                    "x": int(mi.rcMonitor.left),
-                    "y": int(mi.rcMonitor.top),
-                    "width": int(mi.rcMonitor.right - mi.rcMonitor.left),
-                    "height": int(mi.rcMonitor.bottom - mi.rcMonitor.top),
+                    "primary": bool(info.dwFlags & 1),
+                    "x": int(info.rcMonitor.left),
+                    "y": int(info.rcMonitor.top),
+                    "width": int(info.rcMonitor.right - info.rcMonitor.left),
+                    "height": int(info.rcMonitor.bottom - info.rcMonitor.top),
                 }
             )
         return 1
 
-    MONITORENUMPROC = ctypes.WINFUNCTYPE(
-        ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.c_double
-    )
     try:
-        ctypes.windll.user32.EnumDisplayMonitors(0, 0, MONITORENUMPROC(_callback), 0)
+        callback = MONITORENUMPROC(_callback)
+        ok = user32.EnumDisplayMonitors(0, 0, callback, 0)
+        if not ok:
+            return []
     except Exception:
         return []
     return monitors
 
 
 def _browser_available(browser: str) -> bool:
-    """True when the browser executable exists at a standard location.
-
-    Only a boolean is reported: full paths contain the user name (PII).
-    """
+    """Return only a boolean; candidate paths are never emitted."""
     if sys.platform != "win32":
         return False
-    candidates = {
-        "chrome": ("ProgramFiles", "Google/Chrome/Application/chrome.exe"),
-        "edge": ("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"),
+
+    candidates: dict[str, tuple[tuple[str, str], ...]] = {
+        "chrome": (
+            ("ProgramFiles", "Google/Chrome/Application/chrome.exe"),
+            ("ProgramFiles(x86)", "Google/Chrome/Application/chrome.exe"),
+            ("LOCALAPPDATA", "Google/Chrome/Application/chrome.exe"),
+        ),
+        "edge": (
+            ("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"),
+            ("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"),
+        ),
     }
-    if browser not in candidates:
+    for env_var, relative in candidates.get(browser, ()):
+        base = os.environ.get(env_var)
+        if base and (Path(base) / relative).exists():
+            return True
+    return False
+
+
+def _microphone_available() -> bool:
+    """Probe for a usable default input without exposing device metadata."""
+    try:
+        import sounddevice as sd
+
+        info = sd.query_devices(kind="input")
+        if isinstance(info, dict):
+            return int(info.get("max_input_channels") or 0) > 0
+        max_channels = getattr(info, "max_input_channels", 0)
+        return int(max_channels or 0) > 0
+    except Exception:
         return False
-    env_var, relative = candidates[browser]
-    base = os.environ.get(env_var)
-    if not base:
-        return False
-    return (Path(base) / relative).exists()
 
 
 def probe() -> dict[str, Any]:
     """Collect machine capabilities; technical metadata only, no PII."""
     monitors = _windows_monitors()
+    optional = {
+        name.lower(): _module_available(name)
+        for name in (
+            "pywinauto",
+            "pycaw",
+            "wmi",
+            "mss",
+            "playwright",
+            "PyQt6",
+            "sounddevice",
+        )
+    }
     return {
         "platform": sys.platform,
         "windows_version": platform.version() if sys.platform == "win32" else "",
         "python_version": platform.python_version(),
         "monitor_count": len(monitors),
         "monitors": monitors,
-        "negative_coordinates": any(m["x"] < 0 or m["y"] < 0 for m in monitors),
+        "negative_coordinates": any(
+            monitor["x"] < 0 or monitor["y"] < 0 for monitor in monitors
+        ),
         "primary_resolution": next(
-            ({"width": m["width"], "height": m["height"]} for m in monitors if m["primary"]),
+            (
+                {"width": monitor["width"], "height": monitor["height"]}
+                for monitor in monitors
+                if monitor["primary"]
+            ),
             None,
         ),
         "chrome_available": _browser_available("chrome"),
         "edge_available": _browser_available("edge"),
-        "microphone_available": _module_available("sounddevice"),
-        # Optional integrations are flattened to the top level so the
-        # matrix requirements and the runner can address them directly.
-        **{
-            name.lower(): _module_available(name)
-            for name in ("pywinauto", "pycaw", "wmi", "mss", "playwright", "PyQt6", "sounddevice")
-        },
+        "microphone_available": _microphone_available(),
+        **optional,
         # CDP is opt-in by explicit configuration only.
         "cdp_available": bool(os.environ.get("ANTONELLA_E2E_CDP")),
     }
