@@ -1,0 +1,9 @@
+name: Meeting Action Items
+slug: meeting-action-items
+version: 0.1.0
+description: Converte items de reunião em tarefas com owner/deadline apenas quando explícitos.
+entrypoint: skill:run
+permissions: []
+risk: low
+timeout_seconds: 30
+author: glm

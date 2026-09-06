@@ -1,0 +1,9 @@
+name: Daily Report
+slug: daily-report
+version: 0.1.0
+description: Formata o relatório diário a partir dos dados fornecidos pelo utilizador; nunca inventa trabalho.
+entrypoint: skill:run
+permissions: []
+risk: low
+timeout_seconds: 30
+author: glm

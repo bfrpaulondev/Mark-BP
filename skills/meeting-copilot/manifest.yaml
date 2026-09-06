@@ -1,0 +1,9 @@
+name: Meeting Copilot
+slug: meeting-copilot
+version: 0.1.0
+description: Extrai decisões, acções, bloqueios e perguntas de segmentos de transcrição autorizados.
+entrypoint: skill:run
+permissions: []
+risk: low
+timeout_seconds: 30
+author: glm
