@@ -19,6 +19,7 @@ certificate files renamed (regenerated on first dashboard start).
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -41,6 +42,7 @@ ACTIVE_SURFACE_DIRS = (
 )
 PROHIBITION_SURFACES = frozenset({"antonella.py", "core/prompt.txt"})
 PROHIBITION_PHRASES = ("do not call yourself", "never call yourself")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _active_paths():
@@ -69,6 +71,16 @@ def _is_allowed_prohibition(label: str, lowered_line: str, token: str) -> bool:
     )
 
 
+def _scan_forms(path: Path, line: str) -> tuple[str, ...]:
+    lowered = line.lower()
+    if path.suffix.lower() == ".html":
+        # Visible identity may be split across markup, e.g. <em>J</em>ARVIS.
+        # Strip tags and scan the rendered-text approximation as well.
+        without_tags = _HTML_TAG_RE.sub("", lowered)
+        return lowered, without_tags
+    return (lowered,)
+
+
 class IdentityFinalRegressionTests(unittest.TestCase):
     def test_no_forbidden_tokens_in_active_surface_paths_or_text(self):
         for path, label in _active_paths():
@@ -82,14 +94,19 @@ class IdentityFinalRegressionTests(unittest.TestCase):
 
             text = path.read_text(encoding="utf-8")
             for line_no, line in enumerate(text.splitlines(), start=1):
-                lowered = line.lower()
-                for token in FORBIDDEN_TOKENS:
-                    if token not in lowered:
-                        continue
-                    if _is_allowed_prohibition(label, lowered, token):
-                        continue
-                    with self.subTest(surface=label, line=line_no, token=token, location="text"):
-                        self.fail(f"forbidden token {token!r}: {line.strip()[:90]}")
+                for scan_form in _scan_forms(path, line):
+                    for token in FORBIDDEN_TOKENS:
+                        if token not in scan_form:
+                            continue
+                        if _is_allowed_prohibition(label, scan_form, token):
+                            continue
+                        with self.subTest(
+                            surface=label,
+                            line=line_no,
+                            token=token,
+                            location="text",
+                        ):
+                            self.fail(f"forbidden token {token!r}: {line.strip()[:90]}")
 
     def test_ui_alias_is_removed_after_consumer_migration(self):
         ui_source = (ROOT / "ui" / "__init__.py").read_text(encoding="utf-8")
