@@ -12,12 +12,21 @@ from typing import Any, Protocol
 from core.cost_telemetry import get_cost_telemetry, resolve_model_pricing
 from core.providers.contracts import ProviderResponse, ProviderUsage
 from core.providers.gemini_generate import GeminiGenerateClient
+from core.providers.anthropic_messages import AnthropicMessagesClient
+from core.providers.groq_chat import GroqChatClient
 from core.providers.openai_responses import OpenAIResponsesClient
 
 
 class ProviderName(str, Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
+    ANTHROPIC = "anthropic"
+    GROQ = "groq"
+
+
+# G5: adapters that implement generate_text only. Never candidates for
+# VISION until real image support exists.
+_TEXT_ONLY_PROVIDERS = frozenset({ProviderName.ANTHROPIC, ProviderName.GROQ})
 
 
 class ProviderCapability(str, Enum):
@@ -189,6 +198,8 @@ class ProviderRouter:
         self._health: dict[ProviderName, _ProviderHealth] = {
             ProviderName.OPENAI: _ProviderHealth(),
             ProviderName.GEMINI: _ProviderHealth(),
+            ProviderName.ANTHROPIC: _ProviderHealth(),
+            ProviderName.GROQ: _ProviderHealth(),
         }
 
         if adapters is None:
@@ -212,10 +223,16 @@ class ProviderRouter:
         adapters: dict[ProviderName, ProviderAdapter] = {}
         openai_key = str(self._config.get("openai_api_key") or "").strip()
         gemini_key = str(self._config.get("gemini_api_key") or "").strip()
+        anthropic_key = str(self._config.get("anthropic_api_key") or "").strip()
+        groq_key = str(self._config.get("groq_api_key") or "").strip()
         if openai_key:
             adapters[ProviderName.OPENAI] = OpenAIResponsesClient(openai_key)
         if gemini_key:
             adapters[ProviderName.GEMINI] = GeminiGenerateClient(gemini_key)
+        if anthropic_key:
+            adapters[ProviderName.ANTHROPIC] = AnthropicMessagesClient(anthropic_key)
+        if groq_key:
+            adapters[ProviderName.GROQ] = GroqChatClient(groq_key)
         return adapters
 
     # -.-.-.-
@@ -233,16 +250,20 @@ class ProviderRouter:
             if preference is not None
             else self._config.get("model_provider_preference") or "auto"
         ).strip().lower()
-        if preferred not in {"auto", "openai", "gemini"}:
+        if preferred not in {"auto", "openai", "gemini", "anthropic", "groq"}:
             preferred = "auto"
 
         # An explicit setting means "prefer", not "lock"; the existing UI uses
         # that wording. Fallback therefore remains available when both providers
         # are configured.
         if preferred == "openai":
-            order = (ProviderName.OPENAI, ProviderName.GEMINI)
+            order = (ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.GROQ, ProviderName.ANTHROPIC)
         elif preferred == "gemini":
-            order = (ProviderName.GEMINI, ProviderName.OPENAI)
+            order = (ProviderName.GEMINI, ProviderName.OPENAI, ProviderName.ANTHROPIC, ProviderName.GROQ)
+        elif preferred == "anthropic":
+            order = (ProviderName.ANTHROPIC, ProviderName.OPENAI, ProviderName.GEMINI)
+        elif preferred == "groq":
+            order = (ProviderName.GROQ, ProviderName.OPENAI, ProviderName.GEMINI)
         elif selected_role == ProviderRole.FAST:
             order = (ProviderName.GEMINI, ProviderName.OPENAI)
         else:
@@ -256,6 +277,10 @@ class ProviderRouter:
             )
             for provider in order
             if provider in self._adapters
+            # G5: honest capabilities — text-only adapters are never
+            # selected for vision requests.
+            and not (selected_capability == ProviderCapability.VISION
+                     and provider in _TEXT_ONLY_PROVIDERS)
         )
 
     # -.-.-.-
