@@ -22,6 +22,7 @@ import os
 import tempfile
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 
 class TurnRegistry:
@@ -208,54 +209,27 @@ def percentile(values: list[float], pct: float) -> float | None:
 
 
 # ---------------------------------------------------------------------------
-# Barge-in typed settings (ANT-275 physical round 2)
+# Resolved barge-in values (ANT-275 physical round 2)
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class BargeInSettings:
-    """Typed barge-in configuration.
+    """Values already resolved and validated by config.settings.load_config.
 
-    Desktop default is ENABLED with conservative values — the physical
-    Windows round proved a disabled-by-default gate was exercising
-    nothing. Threshold/frames/cooldown stay conservative (speaker bleed
-    is a real risk) and every field can be overridden by env or config.
-    Precedence: env > config > desktop defaults.
+    Defaults, validation and environment precedence belong exclusively to
+    AntonellaSettings. This value object only maps the canonical fields.
     """
 
-    enabled: bool = True
-    threshold: int = 900
-    frames_above: int = 3
-    cooldown_seconds: float = 2.0
+    enabled: bool
+    threshold: int
+    frames_above: int
+    cooldown_seconds: float
 
     # -.-.-.-
     @classmethod
-    def from_config(cls, config: Any) -> "BargeInSettings":
-        import os
-
-        config = config or {}
-
-        def _setting(env_name: str, config_key: str, default):
-            env = os.environ.get(env_name)
-            if env is not None and env != "":
-                return env
-            value = config.get(config_key)
-            if value is not None and value != "":
-                return value
-            return default
-
-        enabled_raw = _setting(
-            "ANTONELLA_BARGE_IN_ENABLED", "barge_in_enabled", cls.DESKTOP_DEFAULTS["enabled"]
-        )
-        enabled = (
-            str(enabled_raw).strip().lower() in ("1", "true", "yes", "on")
-            if isinstance(enabled_raw, str)
-            else bool(enabled_raw)
-        )
+    def from_config(cls, config: dict[str, Any]) -> "BargeInSettings":
         return cls(
-            enabled=enabled,
-            threshold=int(_setting("ANTONELLA_BARGE_IN_THRESHOLD", "barge_in_threshold", cls.DESKTOP_DEFAULTS["threshold"])),
-            frames_above=int(_setting("ANTONELLA_BARGE_IN_FRAMES", "barge_in_frames", cls.DESKTOP_DEFAULTS["frames_above"])),
-            cooldown_seconds=float(_setting("ANTONELLA_BARGE_IN_COOLDOWN", "barge_in_cooldown", cls.DESKTOP_DEFAULTS["cooldown_seconds"])),
+            enabled=config["barge_in_enabled"],
+            threshold=config["barge_in_threshold"],
+            frames_above=config["barge_in_frames"],
+            cooldown_seconds=config["barge_in_cooldown"],
         )
-
-
-BargeInSettings.DESKTOP_DEFAULTS = {"enabled": True, "threshold": 900, "frames_above": 3, "cooldown_seconds": 2.0}

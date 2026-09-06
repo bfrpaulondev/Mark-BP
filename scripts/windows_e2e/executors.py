@@ -239,20 +239,19 @@ def _endpoint_volume():
     except ImportError as exc:
         raise SkipCase("pycaw/comtypes is not installed") from exc
 
-    from comtypes import CLSCTX_ALL
-
     devices = AudioUtilities.GetSpeakers()
-    return _endpoint_from_device(devices, IAudioEndpointVolume._iid_, CLSCTX_ALL)
+    return _endpoint_from_device(devices, IAudioEndpointVolume._iid_, IAudioEndpointVolume, CLSCTX_ALL)
 
 
-def _endpoint_from_device(device, iid, ctx):
+# -.-.-.-
+def _endpoint_from_device(device, iid, interface_type, ctx):
     """pycaw 20251023 exposes AudioDevice.EndpointVolume directly; older
     versions require the COM Activate + QueryInterface dance."""
     modern = getattr(device, "EndpointVolume", None)
     if modern is not None:
         return modern
     interface = device.Activate(iid, ctx, None)
-    return interface.QueryInterface(iid)
+    return interface.QueryInterface(interface_type)
 
 
 # -.-.-.-

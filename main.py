@@ -576,7 +576,7 @@ class AntonellaRuntime:
         self._is_speaking         = False
         # Voice runtime primitives (ANT-271 A3-A5): turn ownership for
         # stale-audio rejection, client-side latency milestones, and the
-        # opt-in energy-gated barge-in detector.
+        # desktop-configured energy-gated barge-in detector.
         self._audio_turn          = TurnRegistry()
         self.voice_latency        = VoiceLatency()
         _cfg = get_config()
@@ -584,7 +584,7 @@ class AntonellaRuntime:
         self._voice_fast_path_candidates = 0
         from core.voice_runtime import BargeInSettings
 
-        _barge_settings          = BargeInSettings.from_config(get_config())
+        _barge_settings          = BargeInSettings.from_config(_cfg)
         self._barge_gate          = BargeInGate(
             enabled=_barge_settings.enabled,
             threshold=_barge_settings.threshold,

@@ -6,33 +6,29 @@ and import-only CI cannot catch that class: the NameError fires at
 CONSTRUCTION time, and main.py pulls the whole actions/ dependency
 chain so import-based tests cannot run in light CI jobs.
 
-This audit is the sound, dependency-free catch: for every active
-first-party module, any name LOADED that is never BOUND anywhere in
-that module (import/def/class/assign/loop/with/except/params) and is
-not a builtin is a guaranteed NameError at runtime — regardless of
-where the use sits (module level or function body).
+This dependency-free heuristic reports loaded names with no binding
+anywhere in an active first-party module. It aggregates all scopes, so a
+binding in an unrelated function can hide a missing module binding. It
+does not resolve scopes or execution order, and dynamic bindings can
+produce false positives. It is not a proof of runtime name safety.
 
-Soundness: no false positives for dynamic binding via globals()/eval
-only where those calls exist; such sites are allowed explicitly below.
+The concrete module-level get_config import check and real runtime
+construction in test_startup_wiring remain the principal startup gates.
 """
 
 from __future__ import annotations
 
 import ast
 import builtins
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Module-level implicit names the interpreter provides (PEP 302 loading,
-# module metadata, typing re-exports used without import in some files).
-IMPLICIT_MODULE_NAMES = frozenset({"__file__", "__name__", "__doc__", "__package__", "Any"})
+# Module metadata provided by the interpreter; typing names require imports.
+IMPLICIT_MODULE_NAMES = frozenset({"__file__", "__name__", "__doc__", "__package__"})
 BUILTIN_NAMES = frozenset(dir(builtins))
-
-# Modules known to bind names dynamically (globals()/exec/setattr) —
-# a strict never-bound check would produce false positives there.
-DYNAMIC_BINDING_MODULES = ("main.py",)
 
 AUDITED_DIRS = ("core", "memory", "tasks", "ui", "dashboard", "plugins", "scripts", "actions", "config", "skills")
 AUDITED_FILES = ("main.py", "antonella.py", "setup.py")
@@ -123,6 +119,26 @@ class UndefinedNameAuditTests(unittest.TestCase):
         tree = ast_module.parse(main_source)
         bound = _bound_names(tree)
         self.assertIn("get_config", bound)
+        imports = {
+            alias.asname or alias.name
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom) and node.module == "config"
+            for alias in node.names
+            if alias.name == "get_config"
+        }
+        self.assertIn("get_config", imports, "get_config must be imported at module scope")
+
+    # -.-.-.-
+    def test_any_requires_an_explicit_import_even_in_deferred_annotations(self):
+        source = "from __future__ import annotations\ndef sample(value: Any):\n    return value\n"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            self.assertEqual(audit_module(path), ["sample.py: line 2: undefined name 'Any'"])
+            path.write_text("from typing import Any\n" + source.replace(
+                "from __future__ import annotations\n", ""
+            ), encoding="utf-8")
+            self.assertEqual(audit_module(path), [])
 
 
 if __name__ == "__main__":

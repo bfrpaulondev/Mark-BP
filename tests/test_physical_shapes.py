@@ -4,8 +4,11 @@ UIAWrapper, no RECT.middle_point) and pycaw 20251023 (modern
 EndpointVolume attribute with legacy Activate fallback)."""
 
 import unittest
+import sys
+import types
+from unittest.mock import Mock, patch
 
-from scripts.windows_e2e.executors import _endpoint_from_device, _rect_center
+from scripts.windows_e2e.executors import _endpoint_from_device, _endpoint_volume, _rect_center
 from scripts.windows_e2e.evidence import EvidenceRecord
 
 
@@ -51,30 +54,42 @@ class PycawShapeTests(unittest.TestCase):
 
         class _ModernDevice:
             EndpointVolume = endpoint
+            Activate = Mock(side_effect=AssertionError("modern devices must not use Activate"))
 
-        self.assertIs(_endpoint_volume_from(_ModernDevice(), iid_marker), endpoint)
+        self.assertIs(_endpoint_from_device(_ModernDevice(), iid_marker, object, "fake-ctx"), endpoint)
+        _ModernDevice.Activate.assert_not_called()
 
     def test_legacy_activate_fallback(self):
-        iid_marker = object()
+        class _EndpointVolume:
+            _iid_ = object()
 
-        class _FakeInterface:
-            def QueryInterface(self, iid):
-                assert iid is iid_marker
-                return "endpoint"
+        endpoint = object()
+        interface = Mock()
+        interface.QueryInterface.return_value = endpoint
+        device = Mock(spec=["Activate"])
+        device.Activate.return_value = interface
+        self.assertIs(_endpoint_from_device(
+            device, _EndpointVolume._iid_, _EndpointVolume, "fake-ctx"
+        ), endpoint)
+        device.Activate.assert_called_once_with(_EndpointVolume._iid_, "fake-ctx", None)
+        interface.QueryInterface.assert_called_once_with(_EndpointVolume)
 
-        class _LegacyDevice:
-            def Activate(self, iid, ctx, none):
-                assert iid is iid_marker
-                return _FakeInterface()
+    # -.-.-.-
+    def test_executor_passes_distinct_guid_and_interface_type(self):
+        class _EndpointVolume:
+            _iid_ = object()
 
-        self.assertEqual(_endpoint_volume_from(_LegacyDevice(), iid_marker, ctx="fake-ctx"), "endpoint")
-
-
-# -.-.-.-
-def _endpoint_volume_from(device, iid_marker, ctx=None):
-    """Mirror of the executor's real selection helper, with a fake iid so
-    no COM/pycaw import is needed."""
-    return _endpoint_from_device(device, iid_marker, ctx)
+        device = object()
+        comtypes = types.ModuleType("comtypes")
+        comtypes.CLSCTX_ALL = object()
+        pycaw = types.ModuleType("pycaw.pycaw")
+        pycaw.IAudioEndpointVolume = _EndpointVolume
+        pycaw.AudioUtilities = types.SimpleNamespace(GetSpeakers=lambda: device)
+        with patch.dict(sys.modules, {
+            "comtypes": comtypes, "pycaw": types.ModuleType("pycaw"), "pycaw.pycaw": pycaw,
+        }), patch("scripts.windows_e2e.executors._endpoint_from_device") as select:
+            self.assertIs(_endpoint_volume(), select.return_value)
+        select.assert_called_once_with(device, _EndpointVolume._iid_, _EndpointVolume, comtypes.CLSCTX_ALL)
 
 
 class UiaSelectorTests(unittest.TestCase):
