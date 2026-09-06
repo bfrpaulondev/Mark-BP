@@ -1,8 +1,9 @@
 """Scheduler abstraction (ANT-278 F9).
 
-Deterministic due-time computation for one-shot, fixed-interval and
-daily-at schedules with an explicit UTC-offset timezone. No external
-triggers are wired here; the runtime decides when to poll ``next_due``.
+Deterministic due-time computation for one-shot, fixed-interval, daily
+and weekly schedules with an explicit fixed UTC-offset timezone. No
+external triggers are wired here; the runtime decides when to poll
+``next_due``.
 """
 
 from __future__ import annotations
@@ -14,12 +15,21 @@ from datetime import datetime, timedelta, timezone
 @dataclass(frozen=True)
 class SchedulerSpec:
     kind: str  # once | interval | daily | weekly
-    at_epoch: float | None = None       # once
+    at_epoch: float | None = None        # once
     interval_seconds: int | None = None  # interval
-    daily_hour: int | None = None        # daily
+    daily_hour: int | None = None        # daily / weekly
     daily_minute: int = 0
-    weekly_weekday: int | None = None    # weekly: 0=Monday .. 6=Sunday
-    tz_offset_minutes: int = 0           # timezone as fixed UTC offset
+    weekly_weekday: int | None = None     # weekly: 0=Monday .. 6=Sunday
+    tz_offset_minutes: int = 0            # fixed UTC offset
+
+
+def _valid_clock(spec: SchedulerSpec) -> bool:
+    return (
+        spec.daily_hour is not None
+        and 0 <= spec.daily_hour <= 23
+        and 0 <= spec.daily_minute <= 59
+        and -24 * 60 < spec.tz_offset_minutes < 24 * 60
+    )
 
 
 def _to_local(now_epoch: float, tz_offset_minutes: int) -> datetime:
@@ -42,26 +52,42 @@ def next_due(spec: SchedulerSpec, *, now: float, last_run: float | None = None) 
         return last_run + spec.interval_seconds
 
     if spec.kind == "weekly":
-        if spec.daily_hour is None or spec.weekly_weekday is None:
+        if not _valid_clock(spec):
+            return None
+        if spec.weekly_weekday is None or not 0 <= spec.weekly_weekday <= 6:
             return None
         local = _to_local(now, spec.tz_offset_minutes)
-        candidate = local.replace(hour=spec.daily_hour, minute=spec.daily_minute, second=0, microsecond=0)
+        candidate = local.replace(
+            hour=spec.daily_hour,
+            minute=spec.daily_minute,
+            second=0,
+            microsecond=0,
+        )
         days_ahead = (spec.weekly_weekday - candidate.weekday()) % 7
         candidate += timedelta(days=days_ahead)
         candidate_epoch = candidate.timestamp()
+
+        # If this week's occurrence has already been recorded, move to the
+        # next one. Exact ``now == candidate`` remains due; using <= here
+        # would silently skip a whole week at the scheduled instant.
         if last_run is not None and candidate_epoch <= last_run:
             candidate += timedelta(days=7)
             candidate_epoch = candidate.timestamp()
-        if candidate_epoch <= now and (last_run is None or candidate_epoch > last_run):
+        if candidate_epoch < now and (last_run is None or candidate_epoch > last_run):
             candidate += timedelta(days=7)
             candidate_epoch = candidate.timestamp()
         return candidate_epoch
 
     if spec.kind == "daily":
-        if spec.daily_hour is None or not 0 <= spec.daily_hour <= 23:
+        if not _valid_clock(spec):
             return None
         local = _to_local(now, spec.tz_offset_minutes)
-        candidate = local.replace(hour=spec.daily_hour, minute=spec.daily_minute, second=0, microsecond=0)
+        candidate = local.replace(
+            hour=spec.daily_hour,
+            minute=spec.daily_minute,
+            second=0,
+            microsecond=0,
+        )
         candidate_epoch = candidate.timestamp()
         if last_run is not None and candidate_epoch <= last_run:
             candidate += timedelta(days=1)
