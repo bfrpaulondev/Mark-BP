@@ -44,6 +44,7 @@ from google import genai
 from google.genai import types
 from config import get_gemini_key
 from ui import AntonellaUI, JarvisUI  # JarvisUI alias kept during migration
+from core.voice_runtime import BargeInGate, TurnRegistry, VoiceLatency
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary, pop_last_session,
@@ -573,6 +574,20 @@ class AntonellaRuntime:
         self.out_queue            = None
         self._loop                = None
         self._is_speaking         = False
+        # Voice runtime primitives (ANT-271 A3-A5): turn ownership for
+        # stale-audio rejection, client-side latency milestones, and the
+        # opt-in energy-gated barge-in detector.
+        self._audio_turn          = TurnRegistry()
+        self.voice_latency        = VoiceLatency()
+        _cfg = get_config()
+        self._voice_fast_path_enabled = False  # V4: off until model-turn suppression is safe
+        self._voice_fast_path_candidates = 0
+        self._barge_gate          = BargeInGate(
+            enabled=bool(_cfg.get("barge_in_enabled") or False),
+            threshold=int(_cfg.get("barge_in_threshold") or 900),
+            frames_above=int(_cfg.get("barge_in_frames") or 3),
+            cooldown_seconds=float(_cfg.get("barge_in_cooldown") or 2.0),
+        )
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
@@ -664,6 +679,7 @@ class AntonellaRuntime:
     def interrupt(self) -> None:
         """Stop assistant speech: drain queued audio and open mic immediately."""
         self._interrupted = True
+        self._audio_turn.advance()  # V2: queued/in-flight audio becomes stale
         q = self.audio_in_queue
         if q:
             drained = 0
@@ -969,8 +985,18 @@ class AntonellaRuntime:
         def callback(indata, frames, time_info, status):
             with self._speaking_lock:
                 assistant_speaking = self._is_speaking
-            if not assistant_speaking and not self.ui.muted and not self._phone_active:
-                data = indata.tobytes()
+            data = indata.tobytes()
+            if assistant_speaking:
+                # V1: opt-in automatic barge-in — analyse mic energy while
+                # speaking; on detection interrupt() stops playback and
+                # reopens the mic. Audio is never sent mid-speech.
+                import audioop
+
+                if self._barge_gate.feed(audioop.rms(data, 2), time.monotonic()):
+                    self.interrupt()
+                return
+            if not self.ui.muted and not self._phone_active:
+                self.voice_latency.mark("last_user_audio")
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
                     {"data": data, "mime_type": "audio/pcm"}
@@ -1009,8 +1035,10 @@ class AntonellaRuntime:
                             # (24000 Hz × 2 bytes/sample × 0.05 s = 2400 bytes per slice)
                             _audio_data = response.data
                             _SLICE = 2400
+                            self.voice_latency.mark("first_response_audio")
+                            _turn = self._audio_turn.current()
                             for _i in range(0, len(_audio_data), _SLICE):
-                                self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
+                                self.audio_in_queue.put_nowait((_turn, _audio_data[_i : _i + _SLICE]))
 
                     if response.server_content:
                         sc = response.server_content
@@ -1025,6 +1053,17 @@ class AntonellaRuntime:
                             if txt:
                                 in_buf.append(txt)
                                 self._last_user_speech = time.monotonic()
+                                self.voice_latency.mark("input_transcription")
+                                # V4: deterministic voice fast-path detection.
+                                # SUPPRESSION of the in-flight model turn is
+                                # not safe with the current Live API usage, so
+                                # detection is only counted for the benchmark
+                                # report (never double-executed).
+                                if getattr(self, "_voice_fast_path_enabled", False):
+                                    from core.local_command_router import parse_local_text_command
+
+                                    if parse_local_text_command(txt) is not None:
+                                        self._voice_fast_path_candidates += 1
 
                         if sc.turn_complete:
                             if self._turn_done_event:
@@ -1121,7 +1160,7 @@ class AntonellaRuntime:
         try:
             while True:
                 try:
-                    chunk = await asyncio.wait_for(
+                    _turn_token, chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(),
                         timeout=0.1
                     )
@@ -1135,6 +1174,9 @@ class AntonellaRuntime:
                         self._turn_done_event.clear()
                     continue
 
+                if not self._audio_turn.is_current(_turn_token):
+                    continue  # V2: stale audio from an interrupted turn
+
                 self.set_speaking(True)
 
                 # Batch all immediately-available chunks into one write to reduce
@@ -1143,9 +1185,12 @@ class AntonellaRuntime:
                 batch = bytearray(chunk)
                 while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
                     try:
-                        batch.extend(self.audio_in_queue.get_nowait())
+                        _more_token, _more = self.audio_in_queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
+                    if not self._audio_turn.is_current(_more_token):
+                        break  # a newer turn invalidated this batch
+                    batch.extend(_more)
 
                 try:
                     await asyncio.to_thread(stream.write, bytes(batch))
