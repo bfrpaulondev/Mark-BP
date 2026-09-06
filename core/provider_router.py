@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from collections.abc import Mapping
@@ -12,12 +13,21 @@ from typing import Any, Protocol
 from core.cost_telemetry import get_cost_telemetry, resolve_model_pricing
 from core.providers.contracts import ProviderResponse, ProviderUsage
 from core.providers.gemini_generate import GeminiGenerateClient
+from core.providers.anthropic_messages import AnthropicMessagesClient
+from core.providers.groq_chat import GroqChatClient
 from core.providers.openai_responses import OpenAIResponsesClient
 
 
 class ProviderName(str, Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
+    ANTHROPIC = "anthropic"
+    GROQ = "groq"
+
+
+# G5: adapters that implement generate_text only. Never candidates for
+# VISION until real image support exists.
+_TEXT_ONLY_PROVIDERS = frozenset({ProviderName.ANTHROPIC, ProviderName.GROQ})
 
 
 class ProviderCapability(str, Enum):
@@ -189,6 +199,8 @@ class ProviderRouter:
         self._health: dict[ProviderName, _ProviderHealth] = {
             ProviderName.OPENAI: _ProviderHealth(),
             ProviderName.GEMINI: _ProviderHealth(),
+            ProviderName.ANTHROPIC: _ProviderHealth(),
+            ProviderName.GROQ: _ProviderHealth(),
         }
 
         if adapters is None:
@@ -212,10 +224,16 @@ class ProviderRouter:
         adapters: dict[ProviderName, ProviderAdapter] = {}
         openai_key = str(self._config.get("openai_api_key") or "").strip()
         gemini_key = str(self._config.get("gemini_api_key") or "").strip()
+        anthropic_key = str(self._config.get("anthropic_api_key") or "").strip()
+        groq_key = str(self._config.get("groq_api_key") or "").strip()
         if openai_key:
             adapters[ProviderName.OPENAI] = OpenAIResponsesClient(openai_key)
         if gemini_key:
             adapters[ProviderName.GEMINI] = GeminiGenerateClient(gemini_key)
+        if anthropic_key:
+            adapters[ProviderName.ANTHROPIC] = AnthropicMessagesClient(anthropic_key)
+        if groq_key:
+            adapters[ProviderName.GROQ] = GroqChatClient(groq_key)
         return adapters
 
     # -.-.-.-
@@ -233,30 +251,37 @@ class ProviderRouter:
             if preference is not None
             else self._config.get("model_provider_preference") or "auto"
         ).strip().lower()
-        if preferred not in {"auto", "openai", "gemini"}:
+        if preferred not in {"auto", "openai", "gemini", "anthropic", "groq"}:
             preferred = "auto"
 
         # An explicit setting means "prefer", not "lock"; the existing UI uses
         # that wording. Fallback therefore remains available when both providers
         # are configured.
         if preferred == "openai":
-            order = (ProviderName.OPENAI, ProviderName.GEMINI)
+            order = (ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.GROQ, ProviderName.ANTHROPIC)
         elif preferred == "gemini":
-            order = (ProviderName.GEMINI, ProviderName.OPENAI)
+            order = (ProviderName.GEMINI, ProviderName.OPENAI, ProviderName.ANTHROPIC, ProviderName.GROQ)
+        elif preferred == "anthropic":
+            order = (ProviderName.ANTHROPIC, ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.GROQ)
+        elif preferred == "groq":
+            order = (ProviderName.GROQ, ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.ANTHROPIC)
         elif selected_role == ProviderRole.FAST:
-            order = (ProviderName.GEMINI, ProviderName.OPENAI)
+            order = (ProviderName.GEMINI, ProviderName.OPENAI, ProviderName.GROQ, ProviderName.ANTHROPIC)
         else:
-            order = (ProviderName.OPENAI, ProviderName.GEMINI)
+            order = (ProviderName.OPENAI, ProviderName.GEMINI, ProviderName.GROQ, ProviderName.ANTHROPIC)
 
-        return tuple(
-            self._candidate_for(
-                provider=provider,
-                role=selected_role,
-                capability=selected_capability,
-            )
-            for provider in order
-            if provider in self._adapters
-        )
+        candidates = []
+        for provider in order:
+            if provider not in self._adapters:
+                continue
+            if (selected_capability == ProviderCapability.VISION
+                    and provider in _TEXT_ONLY_PROVIDERS):
+                continue
+            candidate = self._candidate_for(provider=provider, role=selected_role,
+                                            capability=selected_capability)
+            if candidate is not None:
+                candidates.append(candidate)
+        return tuple(candidates)
 
     # -.-.-.-
     def generate_text(
@@ -543,7 +568,7 @@ class ProviderRouter:
         provider: ProviderName,
         role: ProviderRole,
         capability: ProviderCapability,
-    ) -> ProviderCandidate:
+    ) -> ProviderCandidate | None:
         if provider == ProviderName.OPENAI:
             model_by_role = {
                 ProviderRole.FAST: str(
@@ -569,7 +594,7 @@ class ProviderRouter:
                 ProviderRole.CRITIC: "medium",
                 ProviderRole.VISION: "low",
             }
-        else:
+        elif provider == ProviderName.GEMINI:
             model_by_role = {
                 ProviderRole.FAST: str(
                     self._config.get("gemini_model_fast")
@@ -593,6 +618,16 @@ class ProviderRouter:
                 ).strip(),
             }
             effort_by_role = {item: "low" for item in ProviderRole}
+
+        else:
+            # Text-only providers have no guessed defaults or cross-provider models.
+            if capability == ProviderCapability.VISION:
+                return None
+            model = str(self._config.get(f"{provider.value}_model_{role.value}") or "").strip()
+            if not model:
+                return None
+            model_by_role = {role: model}
+            effort_by_role = {role: "low"}
 
         max_output_by_role = {
             ProviderRole.FAST: 4_000,
@@ -639,6 +674,10 @@ class ProviderRouter:
         text = str(exc or "").casefold()
         if "no usable text" in text or "no output text" in text:
             return "empty_response", True, False
+
+        http_status = re.search(r"\bhttp\s+(\d{3})\b", text)
+        if http_status and (int(http_status[1]) == 429 or 500 <= int(http_status[1]) <= 599):
+            return "transient_provider", True, True
 
         if isinstance(exc, (TimeoutError, ConnectionError)) or any(
             marker in text
@@ -703,6 +742,10 @@ def _provider_config_signature(config: Mapping[str, Any]) -> str:
         "gemini_model_critic",
         "gemini_model_vision",
     )
+    relevant_names += tuple(
+        f"{provider.value}_model_{role.value}"
+        for provider in ProviderName for role in ProviderRole
+    )
     payload: dict[str, Any] = {
         name: str(config.get(name) or "")
         for name in relevant_names
@@ -711,7 +754,7 @@ def _provider_config_signature(config: Mapping[str, Any]) -> str:
     payload["model_pricing_usd_per_million_tokens"] = (
         pricing if isinstance(pricing, Mapping) else {}
     )
-    for secret_name in ("openai_api_key", "gemini_api_key"):
+    for secret_name in (f"{provider.value}_api_key" for provider in ProviderName):
         secret = str(config.get(secret_name) or "")
         payload[f"{secret_name}_digest"] = (
             hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else ""
