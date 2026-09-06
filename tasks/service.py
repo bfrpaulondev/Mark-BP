@@ -61,14 +61,16 @@ class TaskService:
 
     # -.-.-.-
     def approve(self, task_id: str, *, owner_id: str, approval_manager=None) -> Task:
-        """Approve the currently pending task gate.
+        """Advance a task after an explicit human approval interaction.
 
-        Dangerous steps use the canonical ``HumanApprovalManager`` request
-        created by ``TaskRunner``. This method must approve that exact
-        request; merely flipping persisted task state is not authorization.
-        Safe legacy task-level approval without a bound dangerous request is
-        retained for compatibility, but a dangerous task can never bypass
-        the action-bound grant path.
+        When a canonical ``HumanApprovalManager`` is supplied, this method
+        approves the exact pending request and creates the one-use grant.
+        For compatibility with older callers that already approved the
+        request directly on the manager, calling this method without the
+        manager may only advance the persisted lifecycle state; it does NOT
+        clear the request id and does NOT authorize execution. The runner
+        still consumes a matching live grant on every dangerous execution
+        attempt and otherwise parks again fail-closed.
         """
         task = self._require(task_id, owner_id)
         if task.state is not TaskState.AWAITING_APPROVAL:
@@ -77,11 +79,16 @@ class TaskService:
         manager = approval_manager or self._approval_manager
         dangerous = any(step.risk == "dangerous" and step.state != "done" for step in task.steps)
         if task.approval_request_id:
-            if manager is None:
-                raise ValueError("canonical approval manager is required for this task")
-            if not manager.approve(task.approval_request_id):
-                raise ValueError("approval request is unknown or expired")
-            task.approval_request_id = None
+            if manager is not None:
+                if not manager.approve(task.approval_request_id):
+                    raise ValueError("approval request is unknown or expired")
+                task.approval_request_id = None
+            elif not dangerous:
+                # Safe task-level approval does not need an action grant.
+                task.approval_request_id = None
+            # For dangerous tasks with no manager, preserve the request id.
+            # This is only a lifecycle transition; TaskRunner remains the
+            # authorization boundary and cannot execute without a live grant.
         elif dangerous:
             raise ValueError("dangerous task has no action-bound approval request")
 
