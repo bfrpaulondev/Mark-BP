@@ -61,18 +61,24 @@ integrada com as correcções do Principal Agent (`ApprovalButton` incluído).
 
 ## Q4 — Warning `SetProcessDpiAwarenessContext() failed: Acesso negado` (2026-09-06)
 
-Observado fisicamente no Windows. Análise:
+Observado fisicamente no Windows. Estado da investigação:
 
-- O warning ocorre quando o Qt tenta definir PER_MONITOR_AWARE_V2 mas o
-  processo **já tem** DPI awareness definido — o Windows nega a segunda
-  definição ("Acesso negado"). O awareness prévio pode vir do manifest da
-  app, de chamadas Windows anteriores ao QApplication, ou de componentes
-  que usam `SetThreadDpiAwarenessContext` (ex.: captura MSS).
-- Como a geometria/clamp multi-monitor funciona (fatia 1) e o rendering
-  está correcto, o awareness efectivo do processo já é o pretendido — o
-  warning é **cosmético**.
-- Decisão: **não** forçar configuração DPI adicional no Qt (não quebrar
-  multi-monitor por um warning); não suprimir o warning à força.
-- Follow-up de diagnóstico (opcional): identificar o componente que define
-  o awareness primeiro; se um dia o rendering físico mostrar DPI errado,
-  reavaliar com o harness físico (ANT-275) antes de alterar configuração.
+- Este warning é compatível com o caso em que o Qt tenta definir
+  `PER_MONITOR_AWARE_V2` depois de o processo já ter um contexto de DPI
+  awareness definido; o Windows pode negar uma segunda definição. No
+  projecto existem também chamadas thread-local a
+  `SetThreadDpiAwarenessContext` para obter coordenadas físicas, mas isso
+  por si só não prova qual componente definiu primeiro o contexto do
+  processo.
+- O arranque continuou depois do warning, portanto ele é **não fatal no
+  cenário observado**. Ainda não existe evidência física suficiente para
+  classificá-lo como puramente cosmético nem para afirmar que rendering e
+  scaling estão correctos em 100/125/150%, monitores mistos ou coordenadas
+  negativas.
+- Decisão: **não** forçar nem suprimir configuração DPI apenas para remover
+  o warning. Uma alteração dessas só deve acontecer se a matriz física do
+  ANT-275 demonstrar geometria/rendering incorrectos.
+- Follow-up físico: validar 100%, 125%, 150%, dois monitores com DPI
+  diferentes, monitor à esquerda/coordenadas negativas e reconexão. Se
+  esses cenários forem correctos, o warning pode ser tratado como ruído de
+  inicialização; se não, deve ser corrigida a origem real do awareness.
