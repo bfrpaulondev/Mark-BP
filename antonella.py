@@ -22,7 +22,9 @@ from main import (
     format_memory_for_prompt,
     load_memory,
 )
-from ui import AntonellaUI, JarvisUI  # alias during migration
+from memory.bootstrap import create_memory_stack
+from memory.command_bridge import MemoryCommandBridge
+from ui import AntonellaUI
 from ui.runtime_dashboard import attach_runtime_dashboard
 from ui.voice_feedback import local_command_feedback
 
@@ -37,12 +39,25 @@ _SPOKEN_LOCAL_KINDS = frozenset(
 
 
 class AntonellaLive(AntonellaRuntime):
-    """Antonella identity/voice layer over the stabilized legacy realtime engine."""
+    """Antonella identity/voice layer over the stabilized realtime engine."""
 
     # -.-.-.-
     def __init__(self, ui: AntonellaUI):
         super().__init__(ui)
         self._last_orchestration_event: OrchestrationEvent | None = None
+        # R1/R2/R5: memory stack + natural command bridge + habit ladder.
+        self.memory_stack = create_memory_stack()
+        self.memory_bridge = MemoryCommandBridge(
+            self.memory_stack.service,
+            owner_id=self.memory_stack.owner_id,
+            backend=self.memory_stack.backend,
+            persistent=self.memory_stack.persistent,
+            log=lambda text: self.ui.write_log(f"SYS: memória · {text}"),
+        )
+        self.ui.write_log(
+            f"SYS: Memory backend: {self.memory_stack.backend}; "
+            f"status: {self.memory_stack.status}; persistent: {self.memory_stack.persistent}"
+        )
         self._agent_orchestrator = AgentOrchestrator(
             requires_postcondition=requires_postcondition,
             capture_postcondition_state=capture_postcondition_state,
@@ -56,7 +71,8 @@ class AntonellaLive(AntonellaRuntime):
         self._last_orchestration_event = event
         if event.stage == AgentStage.FAILED:
             self.ui.write_log(
-                f"SYS: agent · failed · {event.tool_name} · {event.metadata.get('error_type', 'error')}"
+                f"SYS: agent · failed · {event.tool_name} · "
+                f"{event.metadata.get('error_type', 'error')}"
             )
 
     # -.-.-.-
@@ -128,7 +144,19 @@ class AntonellaLive(AntonellaRuntime):
 
     # -.-.-.-
     def _on_text_command(self, text: str) -> None:
-        """Use deterministic local actions before paying for a Live model turn."""
+        """Handle explicit memory commands first, then deterministic local actions."""
+        memory_result = self.memory_bridge.handle(text)
+        if memory_result is not None:
+            user_text = str(text or "").strip()
+            self.ui.write_log(f"You: {user_text}")
+            self.ui.write_log(f"SYS: memória · {memory_result['intent']}")
+            self._session_log.append(f"You: {user_text}")
+            assistant_name = getattr(self, "_asst_name", "Antonella")
+            self.ui.write_log(f"{assistant_name}: {memory_result['spoken']}")
+            self._session_log.append(f"{assistant_name}: {memory_result['spoken']}")
+            self.speak(memory_result["spoken"])
+            return
+
         intent = parse_local_text_command(text)
         if intent is None:
             super()._on_text_command(text)
@@ -149,7 +177,6 @@ class AntonellaLive(AntonellaRuntime):
                 capture_open_app_state(app_name) if intent.kind == "open_app" else None
             )
             result = execute_local_intent(intent, player=self.ui)
-            message = result.message or "Comando local concluído."
             verification = None
             if intent.kind == "open_app" and not result.verified:
                 verification = verify_open_app_postcondition(
@@ -158,19 +185,25 @@ class AntonellaLive(AntonellaRuntime):
                 )
                 self.ui.write_log(
                     "SYS: verify · fast-path open_app · "
-                    f"delivered={verification.delivered} · verified={verification.verified}"
+                    f"delivered={verification.delivered} · "
+                    f"verified={verification.verified}"
                 )
+                # Keep the verifier's canonical success gate explicit at the
+                # fast-path boundary. Voice still comes from the shared
+                # feedback mapper, so this guard cannot invent a success.
                 if verification.can_claim_success:
-                    message = f"Abri {app_name} e confirmei que a aplicação está em execução."
-                elif verification.error:
-                    message = f"Tentei abrir {app_name}, mas não consegui confirmar: {verification.error}"
+                    self.ui.write_log("SYS: verify · fast-path open_app · confirmed")
             feedback = local_command_feedback(result, verification)
             self.ui.write_log(f"{assistant_name}: {feedback.phrase_pt}")
             self._session_log.append(f"{assistant_name}: {feedback.phrase_pt}")
+
+            # One real execution produces one observation. The bridge also
+            # de-duplicates accidental duplicate instrumentation defensively.
+            suggestion = self.memory_bridge.observe(f"local.{intent.kind}")
+            if suggestion:
+                self.ui.write_log(f"SYS: {suggestion}")
+
             if intent.kind in _SPOKEN_LOCAL_KINDS:
-                # Spoken confirmation through the existing engine channel
-                # (no-op without a live session); phrase honesty is
-                # guaranteed by the voice feedback layer.
                 self.speak(feedback.phrase_pt)
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
@@ -183,7 +216,7 @@ class AntonellaLive(AntonellaRuntime):
 
     # -.-.-.-
     async def _execute_tool(self, fc) -> types.FunctionResponse:
-        """Run the legacy tool through the provider-neutral orchestration lifecycle."""
+        """Run the tool through the provider-neutral orchestration lifecycle."""
         name = str(fc.name or "")
         args = dict(fc.args or {})
         self.voice_latency.mark("agent_start")
@@ -206,8 +239,8 @@ class AntonellaLive(AntonellaRuntime):
         action_name = f"{name}.{action_suffix}" if action_suffix else name
         self.ui.write_log(
             "SYS: verify · "
-            f"{action_name} · delivered={execution.delivered} · verified={execution.verified} · "
-            f"task={outcome.correlation_id}"
+            f"{action_name} · delivered={execution.delivered} · "
+            f"verified={execution.verified} · task={outcome.correlation_id}"
         )
         return types.FunctionResponse(
             id=fc.id,
