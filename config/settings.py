@@ -39,6 +39,8 @@ class AntonellaSettings(BaseSettings):
 
     gemini_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
+    groq_api_key: SecretStr | None = None
     os_system: Literal["windows", "mac", "linux"] = Field(default_factory=_platform_os)
     assistant_name: str = "Antonella"
     user_name: str = ""
@@ -51,7 +53,7 @@ class AntonellaSettings(BaseSettings):
     llm_model: str = "llama3.2"
     llm_provider: str = "ollama"
 
-    model_provider_preference: Literal["auto", "openai", "gemini"] = "auto"
+    model_provider_preference: Literal["auto", "openai", "gemini", "anthropic", "groq"] = "auto"
     openai_model_fast: str = "gpt-5.6-luna"
     openai_model_balanced: str = "gpt-5.6-terra"
     openai_model_expert: str = "gpt-5.6-sol"
@@ -60,6 +62,16 @@ class AntonellaSettings(BaseSettings):
     gemini_model_expert: str = "gemini-flash-latest"
     gemini_model_critic: str = "gemini-flash-latest"
     gemini_model_vision: str = "gemini-flash-latest"
+    anthropic_model_fast: str = ""
+    anthropic_model_balanced: str = ""
+    anthropic_model_expert: str = ""
+    anthropic_model_critic: str = ""
+    anthropic_model_vision: str = ""
+    groq_model_fast: str = ""
+    groq_model_balanced: str = ""
+    groq_model_expert: str = ""
+    groq_model_critic: str = ""
+    groq_model_vision: str = ""
     computer_use_cost_mode: Literal["economy", "balanced", "quality"] = "economy"
     computer_use_local_perception_enabled: bool = True
     model_pricing_usd_per_million_tokens: dict[str, dict[str, float]] = Field(
@@ -98,6 +110,16 @@ class AntonellaSettings(BaseSettings):
         "gemini_model_expert",
         "gemini_model_critic",
         "gemini_model_vision",
+        "anthropic_model_fast",
+        "anthropic_model_balanced",
+        "anthropic_model_expert",
+        "anthropic_model_critic",
+        "anthropic_model_vision",
+        "groq_model_fast",
+        "groq_model_balanced",
+        "groq_model_expert",
+        "groq_model_critic",
+        "groq_model_vision",
         mode="before",
     )
     @classmethod
@@ -209,6 +231,14 @@ def load_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
 
     if settings.openai_api_key is not None:
         data["openai_api_key"] = settings.openai_api_key.get_secret_value()
+
+    for provider in ("anthropic", "groq"):
+        secret = getattr(settings, f"{provider}_api_key")
+        if secret is not None:
+            data[f"{provider}_api_key"] = secret.get_secret_value()
+        for role in ("fast", "balanced", "expert", "critic", "vision"):
+            name = f"{provider}_model_{role}"
+            data[name] = getattr(settings, name)
 
     return data
 
