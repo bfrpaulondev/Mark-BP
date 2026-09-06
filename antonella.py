@@ -16,6 +16,7 @@ from core.postcondition_verifiers import (
 from core.tool_verification_policy import requires_postcondition
 from google.genai import types
 from main import (
+    SEND_SAMPLE_RATE,
     TOOL_DECLARATIONS,
     AntonellaRuntime,
     _load_system_prompt,
@@ -183,6 +184,87 @@ class AntonellaLive(AntonellaRuntime):
         return types.LiveConnectConfig(**live_config)
 
     # -.-.-.-
+    def _report_live_send_failure(self, future, label: str) -> None:
+        """Surface background Live-send failures instead of dropping Future exceptions."""
+        try:
+            future.result()
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            self.ui.write_log(f"ERR: Live {label} failed: {detail[:180]}")
+            self.ui.set_state("FAILED")
+
+    # -.-.-.-
+    def _schedule_realtime_text(self, text: str, *, label: str) -> bool:
+        """Send interactive text over the same realtime channel used by microphone audio."""
+        value = str(text or "").strip()
+        loop = self._loop
+        session = self.session
+        if not value:
+            return False
+        if loop is None or session is None:
+            self.ui.write_log(f"ERR: Live {label} unavailable; session is not connected.")
+            self.ui.set_state("FAILED")
+            return False
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                session.send_realtime_input(text=value),
+                loop,
+            )
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            self.ui.write_log(f"ERR: Live {label} failed: {detail[:180]}")
+            self.ui.set_state("FAILED")
+            return False
+
+        future.add_done_callback(
+            lambda done, _label=label: self._report_live_send_failure(done, _label)
+        )
+        return True
+
+    # -.-.-.-
+    async def _send_realtime(self) -> None:
+        """Send PCM audio using the current explicit Gemini Live audio payload."""
+        announced = False
+        while True:
+            msg = await self.out_queue.get()
+
+            if isinstance(msg, types.Blob):
+                blob = msg
+            elif isinstance(msg, (bytes, bytearray, memoryview)):
+                blob = types.Blob(
+                    data=bytes(msg),
+                    mime_type=f"audio/pcm;rate={SEND_SAMPLE_RATE}",
+                )
+            elif isinstance(msg, dict):
+                data = msg.get("data")
+                if not isinstance(data, (bytes, bytearray, memoryview)):
+                    raise TypeError("Live audio queue item has no PCM byte payload")
+                mime_type = str(msg.get("mime_type") or "audio/pcm")
+                if mime_type == "audio/pcm":
+                    mime_type = f"audio/pcm;rate={SEND_SAMPLE_RATE}"
+                blob = types.Blob(data=bytes(data), mime_type=mime_type)
+            else:
+                raise TypeError(f"Unsupported Live audio queue item: {type(msg).__name__}")
+
+            await self.session.send_realtime_input(audio=blob)
+            if not announced:
+                self.ui.write_log(
+                    f"SYS: Live audio uplink active (PCM {SEND_SAMPLE_RATE // 1000} kHz)."
+                )
+                announced = True
+
+    # -.-.-.-
+    def speak(self, text: str) -> None:
+        """Route runtime speech prompts through realtime text to avoid mixed Live input modes."""
+        self._schedule_realtime_text(text, label="speech request")
+
+    # -.-.-.-
+    def plugin_say(self, instruction: str) -> None:
+        """Route plugin speech requests through the active realtime Live channel."""
+        self._schedule_realtime_text(instruction, label="plugin speech")
+
+    # -.-.-.-
     def _on_text_command(self, text: str) -> None:
         """Handle explicit memory commands first, then deterministic local actions."""
         memory_result = self.memory_bridge.handle(text)
@@ -199,7 +281,7 @@ class AntonellaLive(AntonellaRuntime):
 
         intent = parse_local_text_command(text)
         if intent is None:
-            super()._on_text_command(text)
+            self._schedule_realtime_text(text, label="text input")
             return
 
         user_text = str(text or "").strip()
