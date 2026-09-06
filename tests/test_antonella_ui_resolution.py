@@ -14,12 +14,13 @@ class AntonellaUiResolutionTests(unittest.TestCase):
         self.assertEqual(Path(spec.origin).as_posix().split("/")[-2:], ["ui", "__init__.py"])
 
     # -.-.-.-
-    def test_legacy_ui_module_remains_available_for_rollback(self):
+    def test_legacy_ui_module_is_removed_after_b4_authorization(self):
+        # B4 (authorized): the legacy module was proven unreachable
+        # (package resolution + no entrypoint) and is now REMOVED.
         root = Path(__file__).resolve().parent.parent
-        legacy = root / "ui.py"
         new_ui = root / "ui" / "__init__.py"
 
-        self.assertTrue(legacy.is_file())
+        self.assertFalse((root / "ui.py").exists())
         self.assertTrue(new_ui.is_file())
 
     # -.-.-.-

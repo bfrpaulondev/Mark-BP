@@ -17,12 +17,12 @@ from core.tool_verification_policy import requires_postcondition
 from google.genai import types
 from main import (
     TOOL_DECLARATIONS,
-    JarvisLive,
+    AntonellaRuntime,
     _load_system_prompt,
     format_memory_for_prompt,
     load_memory,
 )
-from ui import JarvisUI
+from ui import AntonellaUI, JarvisUI  # alias during migration
 from ui.runtime_dashboard import attach_runtime_dashboard
 from ui.voice_feedback import local_command_feedback
 
@@ -36,11 +36,11 @@ _SPOKEN_LOCAL_KINDS = frozenset(
 )
 
 
-class AntonellaLive(JarvisLive):
+class AntonellaLive(AntonellaRuntime):
     """Antonella identity/voice layer over the stabilized legacy realtime engine."""
 
     # -.-.-.-
-    def __init__(self, ui: JarvisUI):
+    def __init__(self, ui: AntonellaUI):
         super().__init__(ui)
         self._last_orchestration_event: OrchestrationEvent | None = None
         self._agent_orchestrator = AgentOrchestrator(
@@ -222,7 +222,7 @@ class AntonellaLive(JarvisLive):
 
 # -.-.-.-
 def main() -> None:
-    ui = JarvisUI()
+    ui = AntonellaUI()
     attach_runtime_dashboard(ui)
 
     def runner() -> None:
