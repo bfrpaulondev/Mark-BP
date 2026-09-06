@@ -48,20 +48,30 @@ class SkillRegistry:
 
     # -.-.-.-
     def register(self, slug: str, version: str, permissions: tuple[str, ...], risk: str) -> SkillRecord:
-        """Register (or re-register) one specific version as DRAFT.
+        """Register one immutable version as DRAFT.
 
-        The previous active version is left untouched (S1) — a new
-        candidate must go through the full lifecycle again.
+        Re-registering an identical version is an idempotent no-op. Changing
+        permissions or risk under the same semantic version is rejected:
+        permission/risk changes require a new version and the full lifecycle,
+        otherwise an ACTIVE skill could be mutated without review.
         """
         versions = self._versions.setdefault(slug, {})
+        normalized_permissions = tuple(permissions)
         existing = versions.get(version)
+        if existing is not None:
+            if existing.permissions != normalized_permissions or existing.risk != risk:
+                raise ValueError(
+                    "registered skill versions are immutable; create a new version for permission/risk changes"
+                )
+            self._latest[slug] = version
+            return existing
+
         record = SkillRecord(
             slug=slug,
             version=version,
-            state=existing.state if existing else "draft",
-            permissions=permissions,
+            state="draft",
+            permissions=normalized_permissions,
             risk=risk,
-            supersedes_version=existing.supersedes_version if existing else "",
         )
         versions[version] = record
         self._latest[slug] = version
