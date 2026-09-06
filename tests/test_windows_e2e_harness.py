@@ -64,8 +64,21 @@ class CapabilityProbeTests(unittest.TestCase):
         for forbidden in ("users\\\\", "userprofile", "home)", "bruno", "desktop"):
             self.assertNotIn(forbidden, text)
         self.assertIn("python_version", data)
+        self.assertIn("package_versions", data)
+        self.assertIsInstance(data["package_versions"], dict)
         self.assertIn("monitor_count", data)
         self.assertFalse(data["cdp_available"] == "configured")
+
+    def test_known_package_versions_never_return_paths(self):
+        with mock.patch.object(
+            probe_module.metadata,
+            "version",
+            side_effect=lambda name: "1.2.3" if name == "pywinauto" else (_ for _ in ()).throw(probe_module.metadata.PackageNotFoundError()),
+        ):
+            versions = probe_module._known_package_versions()
+        self.assertEqual(versions, {"pywinauto": "1.2.3"})
+        self.assertNotIn("/", json.dumps(versions))
+        self.assertNotIn("\\", json.dumps(versions))
 
     def test_monitor_requirements_use_probe_keys(self):
         known_keys = set(probe_module.probe()) | {"monitor_count>=2", "chrome_available"}
@@ -102,8 +115,64 @@ class EvidenceBundleTests(unittest.TestCase):
         self.assertIn("| dpi | NOT PHYSICALLY TESTED |", report)
         self.assertIn("never counted as PASS", report)
 
+    def test_markdown_includes_bounded_error_detail(self):
+        bundle = evidence_module.EvidenceBundle()
+        bundle.add(
+            evidence_module.EvidenceRecord(
+                case_id="uia_inspect",
+                status="FAIL",
+                result={
+                    "ok": False,
+                    "delivered": False,
+                    "verified": False,
+                    "error_type": "AttributeError",
+                    "error_detail": "wrapper has no attribute 'x'",
+                },
+            )
+        )
+        report = bundle.to_markdown()
+        self.assertIn("Error detail", report)
+        self.assertIn("wrapper has no attribute 'x'", report)
+
 
 class RunnerDryRunTests(unittest.TestCase):
+    def test_safe_error_detail_redacts_local_paths_and_bounds_output(self):
+        fake_root = Path("C:/repo/Antonella")
+        detail = runner_module._safe_error_detail(
+            AttributeError(f"C:/repo/Antonella/file.py | missing\nattribute {'x' * 300}"),
+            root=fake_root,
+        )
+        self.assertIn("<repo>", detail)
+        self.assertNotIn("C:/repo/Antonella", detail)
+        self.assertNotIn("|", detail)
+        self.assertNotIn("\n", detail)
+        self.assertLessEqual(len(detail), 180)
+
+    def test_physical_exception_records_type_and_safe_detail(self):
+        import tempfile
+
+        original = runner_module.EXECUTORS.get("filesystem")
+        runner_module.EXECUTORS["filesystem"] = lambda _cap: (_ for _ in ()).throw(
+            AttributeError("synthetic missing attribute")
+        )
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                with mock.patch.dict(
+                    runner_module.os.environ,
+                    {"ANTONELLA_E2E_PHYSICAL": "1"},
+                    clear=False,
+                ), mock.patch.object(runner_module.sys, "platform", "win32"):
+                    bundle = runner_module.run(Path(tmp), capabilities={})
+                record = {item.case_id: item for item in bundle.records}["filesystem"]
+                self.assertEqual(record.status, "FAIL")
+                self.assertEqual(record.result["error_type"], "AttributeError")
+                self.assertEqual(record.result["error_detail"], "synthetic missing attribute")
+        finally:
+            if original is None:
+                runner_module.EXECUTORS.pop("filesystem", None)
+            else:
+                runner_module.EXECUTORS["filesystem"] = original
+
     def test_dry_run_marks_everything_not_physically_tested(self):
         import tempfile
 
@@ -150,9 +219,6 @@ class RunnerDryRunTests(unittest.TestCase):
                 by_id = {record.case_id: record for record in bundle.records}
                 self.assertEqual(by_id["multi_monitor"].status, "NOT AVAILABLE")
 
-                # With the requirement satisfied but no executor override,
-                # the real registered executor is not run here; replace it
-                # with a deterministic no-op verifier for this single case.
                 original = runner_module.EXECUTORS.get("multi_monitor")
                 runner_module.EXECUTORS["multi_monitor"] = lambda capabilities: (
                     {"ok": True, "delivered": True, "verified": True},
