@@ -1,64 +1,58 @@
-"""Voice latency benchmark report (ANT-271 A8/V5).
+"""Report measured client milestones from the runtime's voice_metrics.json.
 
-Consumes a ``voice_metrics.json`` file produced by a physical session
-(the runtime dumps ``VoiceLatency`` snapshots) and reports the honest
-percentiles against the roadmap targets. Without a real session file it
-prints NOT PHYSICALLY TESTED — it never invents numbers.
-
-Usage: python scripts/benchmark_voice.py [--input voice_metrics.json]
+Run Antonella, complete voice turns, then run:
+python scripts/benchmark_voice.py --input voice_metrics.json
+No file proves physical validation. End-of-speech and audible playback
+latency remain unmeasured: first_response_audio marks receipt, not playback.
 """
-
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from core.voice_runtime import percentile  # noqa: E402
-
-# V5: "last_mic_frame" is NOT a proven end-of-speech (no local VAD) —
-# treat its p95 as a LOWER BOUND proxy for the audible-response target.
-TARGETS = {
-    "route_to_agent_ms": 1000.0,          # deterministic dispatch p95 < 1s após transcrição
-    "last_mic_frame_to_first_audio_ms": 3000.0,  # proxy (lower bound) para resposta audível p95 < 3s
-}
+from core.voice_runtime import percentile
 
 
+# -.-.-.-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", default="voice_metrics.json")
     args = parser.parse_args()
-
     path = Path(args.input)
     if not path.exists():
-        print("NOT PHYSICALLY TESTED — no voice_metrics.json from a real session")
-        print("Expected format: [{\"route_to_agent_ms\": 812.0, ...}, ...]")
+        print("NOT PHYSICALLY TESTED — no runtime metrics file")
         return 0
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if (not isinstance(document, dict) or document.get("schema_version") != 1
+                or document.get("source") != "antonella.voice_runtime"
+                or not isinstance(document.get("turns"), list)):
+            raise ValueError("Expected version 1 runtime metrics")
+        samples = []
+        for turn in document["turns"]:
+            if not isinstance(turn, dict) or not isinstance(turn.get("metrics"), dict):
+                raise ValueError("Invalid turn record")
+            if turn.get("interrupted") is False:
+                samples.append(turn["metrics"])
+    except (OSError, ValueError) as error:
+        print(f"Invalid runtime metrics: {type(error).__name__}")
+        return 1
 
-    samples = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(samples, list) or not samples:
-        print("NOT PHYSICALLY TESTED — empty metrics file")
-        return 0
-
-    print("# Voice Latency Report (physical session)")
-    print()
-    print("| Metric | p50 (ms) | p95 (ms) | Target p95 | Met |")
-    print("|---|---|---|---|---|")
-    all_met = True
-    for metric, target in TARGETS.items():
-        values = [s[metric] for s in samples if isinstance(s.get(metric), (int, float))]
-        p50 = percentile(values, 50)
-        p95 = percentile(values, 95)
-        met = p95 is not None and p95 < target
-        all_met = all_met and met
-        print(f"| {metric} | {p50} | {p95} | <{target:.0f} | {'yes' if met else 'NO'} |")
-
-    print()
-    print(f"samples: {len(samples)} · todas as metas cumpridas: {all_met}")
-    print("Valores medidos numa sessão física — nunca inferidos.")
+    print("Voice client milestones (runtime export; physical provenance not verified)")
+    print("| Metric | Valid turns | p50 (ms) | p95 (ms) |")
+    print("|---|---|---|---|")
+    for metric in ("route_to_agent_ms", "agent_to_first_action_ms",
+                   "input_transcription_to_first_audio_ms"):
+        values = [s[metric] for s in samples if type(s.get(metric)) in (int, float)
+                  and math.isfinite(s[metric]) and s[metric] >= 0]
+        print(f"| {metric} | {len(values)} | {percentile(values, 50)} | {percentile(values, 95)} |")
+    print(f"Completed, non-interrupted turns: {len(samples)}")
+    print("True end-of-speech p95: NOT MEASURED (no trustworthy VAD/end-of-turn timestamp)")
+    print("Audible playback latency / physical barge-in: NOT PHYSICALLY TESTED")
     return 0
 
 

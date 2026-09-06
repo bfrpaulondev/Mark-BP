@@ -16,6 +16,11 @@ from __future__ import annotations
 
 import threading
 import time
+import json
+import os
+import tempfile
+from collections import deque
+from pathlib import Path
 
 
 class TurnRegistry:
@@ -104,9 +109,12 @@ class VoiceLatency:
         "first_response_audio",
     )
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
+    def __init__(self, *, output_path: str | Path = "voice_metrics.json", max_turns: int = 200) -> None:
+        self._lock = threading.RLock()
         self._marks: dict[str, float] = {}
+        self._turns: deque[dict] = deque(maxlen=max(1, min(1000, int(max_turns))))
+        self._output_path = Path(output_path)
+        self._turn_id = 0
 
     # -.-.-.-
     def mark(self, milestone: str, now: float | None = None) -> None:
@@ -115,7 +123,7 @@ class VoiceLatency:
         value = now if now is not None else time.monotonic()
         with self._lock:
             # First-occurrence milestones keep their first value in a turn.
-            if milestone.startswith("first_") and milestone in self._marks:
+            if milestone != "last_user_audio" and milestone in self._marks:
                 return
             self._marks[milestone] = value
 
@@ -123,6 +131,33 @@ class VoiceLatency:
     def new_turn(self) -> None:
         with self._lock:
             self._marks.clear()
+
+    # -.-.-.-
+    def complete_turn(self, *, interrupted: bool = False) -> None:
+        """Record/export a bounded, content-free snapshot before resetting marks.
+
+        Called on the receive loop, never from the microphone callback. An
+        export failure is surfaced to the caller; history remains in memory
+        for the next export, while marks are cleared to avoid mixing turns.
+        """
+        with self._lock:
+            self._turn_id += 1
+            self._turns.append({"turn_id": self._turn_id,
+                                "interrupted": interrupted,
+                                "metrics": self.snapshot()})
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                        dir=self._output_path.parent, delete=False) as stream:
+                    temporary = stream.name
+                    json.dump({"schema_version": 1, "source": "antonella.voice_runtime",
+                               "end_of_speech_status": "NOT MEASURED",
+                               "turns": list(self._turns)}, stream, allow_nan=False)
+                os.replace(temporary, self._output_path)
+            finally:
+                if temporary and os.path.exists(temporary):
+                    os.unlink(temporary)
+                self._marks.clear()
 
     # -.-.-.-
     def snapshot(self) -> dict[str, float | None]:

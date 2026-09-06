@@ -1095,7 +1095,12 @@ class AntonellaRuntime:
                                 self._turn_done_event.set()
                             # V4: the finished turn's metrics are final;
                             # the next turn starts with clean milestones.
-                            self.voice_latency.new_turn()
+                            try:
+                                self.voice_latency.complete_turn(
+                                    interrupted=self._interrupted_event.is_set()
+                                )
+                            except OSError:
+                                self.ui.write_log("SYS: Voice metrics export failed; history retained in memory.")
 
                             # If this turn_complete ends an interrupted response, clear the
                             # flag and skip all further processing for that turn.
