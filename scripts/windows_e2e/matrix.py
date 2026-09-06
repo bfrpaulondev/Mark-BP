@@ -1,14 +1,14 @@
 """Windows physical E2E test matrix (ANT-275 C3, C7, C9).
 
 Machine-readable case definitions. Every case declares its capability
-requirements (keys produced by ``capability_probe.probe``) so the runner
-can mark missing-hardware cases ``NOT AVAILABLE`` instead of pretending.
+requirements so the physical runner can distinguish NOT AVAILABLE from
+FAIL without pretending an unexecuted case passed.
 
 Risk classes:
 - safe: no side effects outside fixture apps/sandbox paths;
 - medium: touches real OS state (volume, windows) with bounded recovery;
 - dangerous: destructive/irreversible — requires explicit human approval
-  gate before execution and is never auto-retried.
+  and is never auto-retried.
 """
 
 from __future__ import annotations
@@ -27,9 +27,19 @@ class E2ECase:
 
 
 CASES: tuple[E2ECase, ...] = (
-    # C3 baseline
-    E2ECase("app_launch", "ui", "Launch the Antonella window", ("pyqt6",)),
-    E2ECase("window_focus", "ui", "Focus the fixture window", ("pyqt6", "pywinauto")),
+    # C3 baseline — deterministic local fixture, never the user's real data.
+    E2ECase(
+        "app_launch",
+        "ui",
+        "Launch the local Antonella E2E fixture window",
+        ("pyqt6", "pywinauto"),
+    ),
+    E2ECase(
+        "window_focus",
+        "ui",
+        "Focus the fixture window",
+        ("pyqt6", "pywinauto"),
+    ),
     E2ECase("uia_inspect", "uia", "Inspect fixture window tree via UIA", ("pywinauto",)),
     E2ECase("uia_click", "uia", "Click fixture button via UIA", ("pywinauto",)),
     E2ECase("uia_set_text", "uia", "Set fixture textbox text via UIA", ("pywinauto",)),
@@ -37,24 +47,25 @@ CASES: tuple[E2ECase, ...] = (
     E2ECase("mouse_click", "mouse", "Mouse click on fixture button", ("pywinauto",)),
     E2ECase("keyboard", "keyboard", "Type into fixture textbox", ("pywinauto",)),
     E2ECase("filesystem", "filesystem", "Create/verify/delete file in sandbox temp dir", ()),
-    E2ECase("volume", "audio", "Read and restore volume via pycaw", ("pycaw",), risk="medium"),
-    E2ECase("mute", "audio", "Toggle mute and restore", ("pycaw",), risk="medium"),
+    E2ECase("volume", "audio", "Change, verify and restore volume via pycaw", ("pycaw",), risk="medium"),
+    E2ECase("mute", "audio", "Toggle, verify and restore mute", ("pycaw",), risk="medium"),
     E2ECase("brightness", "system", "Read brightness via WMI", ("wmi",), risk="medium"),
     E2ECase("wifi", "system", "Read Wi-Fi state via OS tools", (), risk="medium"),
-    E2ECase("browser_tabs", "browser", "Open fixture page, open/switch tabs", ("chrome_available", "playwright")),
-    E2ECase("spa", "browser", "SPA route change on local fake SPA", ("chrome_available", "playwright")),
-    E2ECase("popup", "browser", "Popup window detection on local fake SPA", ("chrome_available", "playwright")),
-    E2ECase("download", "browser", "Local download into sandbox dir", ("chrome_available", "playwright")),
+    # Browser executors launch Playwright's own Chromium against a local fixture.
+    E2ECase("browser_tabs", "browser", "Open local fixture and switch tabs", ("playwright",)),
+    E2ECase("spa", "browser", "SPA route change on local fake SPA", ("playwright",)),
+    E2ECase("popup", "browser", "Popup window detection on local fake SPA", ("playwright",)),
+    E2ECase("download", "browser", "Local synthetic download into temp path", ("playwright",)),
     E2ECase("computer_use_pause", "computer_use", "Pause computer use session", ("pyqt6",), risk="medium"),
     E2ECase("computer_use_resume", "computer_use", "Resume computer use session", ("pyqt6",), risk="medium"),
     E2ECase("computer_use_stop", "computer_use", "Stop computer use session", ("pyqt6",), risk="medium"),
-    E2ECase("multi_monitor", "multi_monitor", "Window across two monitors", ("monitor_count>=2",)),
-    E2ECase("dpi", "multi_monitor", "DPI change handling", ("pyqt6",)),
+    E2ECase("multi_monitor", "multi_monitor", "Move fixture window to a secondary monitor", ("monitor_count>=2",)),
+    E2ECase("dpi", "multi_monitor", "Read physical monitor DPI via Win32", ()),
     E2ECase("hot_plug", "multi_monitor", "Monitor connect/disconnect handling", (), risk="medium"),
     E2ECase("stale_frame", "multi_monitor", "Stale capture → input must fail closed", ()),
     E2ECase("voice", "voice", "Microphone capture produces audio levels", ("microphone_available",), risk="medium"),
     E2ECase("barge_in", "voice", "Speech during playback interrupts cleanly", ("microphone_available",), risk="medium"),
-    # C9 Computer Use failure scenarios
+    # C9 Computer Use failure scenarios.
     E2ECase("target_disappeared", "computer_use_failure", "Target window closed mid-task", (), risk="medium"),
     E2ECase("target_moved", "computer_use_failure", "Target window moved mid-task", (), risk="medium"),
     E2ECase("target_minimized", "computer_use_failure", "Target window minimized mid-task", (), risk="medium"),
