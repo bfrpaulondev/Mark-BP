@@ -52,6 +52,12 @@ def _sha256_short(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
 
+# -.-.-.-
+def _markdown_cell(value: Any) -> str:
+    text = str(value if value not in (None, "") else "—")
+    return " ".join(text.replace("|", "/").split())[:180]
+
+
 @dataclass
 class EvidenceRecord:
     case_id: str
@@ -64,7 +70,6 @@ class EvidenceRecord:
     def __post_init__(self) -> None:
         if self.status not in STATUSES:
             raise ValueError(f"invalid evidence status: {self.status}")
-        # Bounded, sanitised evidence only.
         for key in list(self.evidence):
             if key in FORBIDDEN_EVIDENCE_KEYS or key not in ALLOWED_EVIDENCE_KEYS:
                 self.evidence.pop(key, None)
@@ -112,15 +117,16 @@ class EvidenceBundle:
         lines = [
             "# Windows Physical E2E Report",
             "",
-            "| Case | Status | Verified | Delivered | Error type |",
-            "|---|---|---|---|---|",
+            "| Case | Status | Verified | Delivered | Error type | Error detail |",
+            "|---|---|---|---|---|---|",
         ]
         for record in self._records:
             lines.append(
-                f"| {record.case_id} | {record.status} "
-                f"| {str(record.result.get('verified', '—')).lower()} "
-                f"| {str(record.result.get('delivered', '—')).lower()} "
-                f"| {record.result.get('error_type', '—')} |"
+                f"| {_markdown_cell(record.case_id)} | {_markdown_cell(record.status)} "
+                f"| {_markdown_cell(str(record.result.get('verified', '—')).lower())} "
+                f"| {_markdown_cell(str(record.result.get('delivered', '—')).lower())} "
+                f"| {_markdown_cell(record.result.get('error_type', '—'))} "
+                f"| {_markdown_cell(record.result.get('error_detail', record.result.get('reason', '—')))} |"
             )
         lines.append("")
         lines.append("Summary: " + ", ".join(f"{status}: {count}" for status, count in counts.items()))
