@@ -1,7 +1,7 @@
 """
 Plugin discovery, validation, availability checks, collision detection, and dispatch.
 
-Discovery runs once (JarvisLive.__init__ calls discover_plugins()); the resulting
+Discovery runs once (AntonellaRuntime.__init__ calls discover_plugins()); the resulting
 PluginRegistry is cached for the process lifetime. Enable/disable and optional
 availability state are re-read on every declaration/run/UI query.
 """

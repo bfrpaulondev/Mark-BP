@@ -121,7 +121,7 @@ reestruturação (pacote `ui/` viva, `main.py`+`antonella.py` como entrypoints):
 
 | Path | Runtime reachable? | User visible? | Compatibility required? | Safe to remove? |
 |---|---|---|---|---|
-| `ui.py` (3 481 linhas) | **Não** — o pacote `ui/` sombreia o módulo; execução directa é inerte (sem `__main__`) | Não (títulos MARK LI já purgados) | Não encontrado consumidor | **Sim** — candidato a remoção em tarefa própria (tocaria `compileall` na CI) |
+| `ui.py` (3 481 linhas) | **Não** — o pacote `ui/` sombreia o módulo; execução directa é inerte (sem `__main__`) | Não (títulos MARK LI já purgados) | Não encontrado consumidor | **Removido** (B4 autorizado): ficheiro apagado, `compileall` da CI actualizado, testes de ausência adicionados |
 | `main.py` resíduos JARVIS (prints, defaults, comentários) | Sim | Console (stdout) + fallback de prompt | `shutdown_jarvis` é nome interno de tool (nunca falado) | Purgados nesta slice; 0 ocorrências restantes |
 | `main.py` fallback `_load_system_prompt` | Sim (só se `core/prompt.txt` faltar) | Não (instrução interna) | — | Identidade neutra agora |
 | `core/prompt.txt` menções | Sim | Não (proibição explícita + nome interno de tool) | Sim (proibição é intencional) | Não — manter |
