@@ -97,6 +97,6 @@ def requires_postcondition(tool_name: str, args: Mapping[str, Any] | None = None
         return action in _CODE_EFFECT_ACTIONS
     if name == "dev_agent":
         return True
-    if name == "shutdown_jarvis":
+    if name == "shutdown_assistant":
         return True
     return False

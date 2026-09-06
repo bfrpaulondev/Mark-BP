@@ -30,7 +30,7 @@ _DIRECT_LOCAL_TOOLS = {
     "file_controller",
     "display_manager",
     "system_monitor",
-    "shutdown_jarvis",
+    "shutdown_assistant",
 }
 
 _API_DOM_UIA_TOOLS = {

@@ -30,8 +30,34 @@ from core.skills.result import SkillResult
 
 _RESULT_MARKER = "__SKILL_RESULT__"
 _BOOTSTRAP = Path(__file__).resolve().parent / "_bootstrap.py"
-
 _MINIMAL_ENV_KEYS = ("SystemRoot", "windir", "TEMP", "TMP", "PATH", "COMSPEC")
+_REDACTED = "[REDACTED]"
+
+
+# -.-.-.-
+def _redact_secrets(value: Any, secret_values: tuple[str, ...]) -> Any:
+    """Recursively remove injected secret values from an untrusted result.
+
+    Skills are executable code. Even when a secret is intentionally
+    available to a skill, the skill must not be able to echo it into the
+    model/UI/log path through ``SkillResult`` or a crash message.
+    """
+    if isinstance(value, str):
+        redacted = value
+        for secret in secret_values:
+            if secret:
+                redacted = redacted.replace(secret, _REDACTED)
+        return redacted
+    if isinstance(value, dict):
+        return {
+            str(key): _redact_secrets(item, secret_values)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_secrets(item, secret_values) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_secrets(item, secret_values) for item in value)
+    return value
 
 
 class SkillRunner:
@@ -44,7 +70,11 @@ class SkillRunner:
     ):
         self._clock = clock
         self._cancel_event = cancel_event or threading.Event()
-        self._base = Path(base_working_dir) if base_working_dir else Path(tempfile.gettempdir()) / "antonella-skills"
+        self._base = (
+            Path(base_working_dir)
+            if base_working_dir
+            else Path(tempfile.gettempdir()) / "antonella-skills"
+        )
 
     # -.-.-.-
     @property
@@ -52,26 +82,37 @@ class SkillRunner:
         return self._cancel_event
 
     # -.-.-.-
-    def run(self, manifest: SkillManifest, package_dir: Path, args: dict[str, Any], secrets: dict[str, str]) -> SkillResult:
+    def run(
+        self,
+        manifest: SkillManifest,
+        package_dir: Path,
+        args: dict[str, Any],
+        secrets: dict[str, str],
+    ) -> SkillResult:
         """Run one skill version in an isolated subprocess.
 
-        Delivery means the entrypoint returned a JSON dict with ok=True;
-        verification stays False unless the skill itself proves a
-        postcondition and reports it.
+        Delivery means the entrypoint returned a JSON dict with ok=True.
+        Generated skill output is untrusted and cannot self-authorize
+        ``verified=True``; verification belongs to a trusted postcondition
+        outside the generated skill process.
         """
         started = self._clock()
-        working_dir = Path(tempfile.mkdtemp(prefix=f"{manifest.slug}-", dir=str(self._base)))
-        working_dir.mkdir(parents=True, exist_ok=True)
+        self._base.mkdir(parents=True, exist_ok=True)
+        working_dir = Path(
+            tempfile.mkdtemp(prefix=f"{manifest.slug}-", dir=str(self._base))
+        )
 
         env = {key: os.environ[key] for key in _MINIMAL_ENV_KEYS if key in os.environ}
         env["PYTHONUTF8"] = "1"
+        normalized_secrets = {str(key): str(value) for key, value in secrets.items()}
+        secret_values = tuple(value for value in normalized_secrets.values() if value)
         stdin_payload = json.dumps(
             {
-                "skill_path": str(package_dir / "skill.py"),
+                "skill_path": str(Path(package_dir) / "skill.py"),
                 "entrypoint": manifest.entrypoint.split(":")[-1],
                 "working_dir": str(working_dir),
                 "permissions": list(manifest.permissions),
-                "secrets": dict(secrets),
+                "secrets": normalized_secrets,
                 "args": dict(args),
             }
         )
@@ -85,12 +126,19 @@ class SkillRunner:
             cwd=str(working_dir),
             text=True,
         )
-        watcher = threading.Thread(target=self._watch_cancel, args=(process,), daemon=True)
+        watcher = threading.Thread(
+            target=self._watch_cancel,
+            args=(process,),
+            daemon=True,
+        )
         watcher.start()
 
         timed_out = False
         try:
-            stdout, stderr = process.communicate(input=stdin_payload, timeout=manifest.timeout_seconds)
+            stdout, stderr = process.communicate(
+                input=stdin_payload,
+                timeout=manifest.timeout_seconds,
+            )
         except subprocess.TimeoutExpired:
             timed_out = True
             process.kill()
@@ -99,41 +147,75 @@ class SkillRunner:
         duration_ms = int((self._clock() - started) * 1000)
         if timed_out:
             return SkillResult(
-                skill_slug=manifest.slug, ok=False, delivered=False,
-                error="timeout", risk=manifest.risk, duration_ms=duration_ms,
+                skill_slug=manifest.slug,
+                ok=False,
+                delivered=False,
+                error="timeout",
+                risk=manifest.risk,
+                duration_ms=duration_ms,
             )
         if self._cancel_event.is_set():
             return SkillResult(
-                skill_slug=manifest.slug, ok=False, delivered=False,
-                error="cancelled", risk=manifest.risk, duration_ms=duration_ms,
+                skill_slug=manifest.slug,
+                ok=False,
+                delivered=False,
+                error="cancelled",
+                risk=manifest.risk,
+                duration_ms=duration_ms,
             )
         if process.returncode != 0:
+            safe_error = _redact_secrets(
+                (stderr or "skill crashed").strip()[-400:],
+                secret_values,
+            )
             return SkillResult(
-                skill_slug=manifest.slug, ok=False, delivered=False,
-                error=(stderr or "skill crashed").strip()[-400:],  # tail holds the real exception
-                risk=manifest.risk, duration_ms=duration_ms,
+                skill_slug=manifest.slug,
+                ok=False,
+                delivered=False,
+                error=str(safe_error),
+                risk=manifest.risk,
+                duration_ms=duration_ms,
             )
 
         marker = stdout.find(_RESULT_MARKER)
         if marker == -1:
             return SkillResult(
-                skill_slug=manifest.slug, ok=False, delivered=False,
+                skill_slug=manifest.slug,
+                ok=False,
+                delivered=False,
                 error="skill produced no parsable result",
-                risk=manifest.risk, duration_ms=duration_ms,
+                risk=manifest.risk,
+                duration_ms=duration_ms,
             )
         try:
             payload = json.loads(stdout[marker + len(_RESULT_MARKER):].strip())
         except json.JSONDecodeError:
             return SkillResult(
-                skill_slug=manifest.slug, ok=False, delivered=False,
+                skill_slug=manifest.slug,
+                ok=False,
+                delivered=False,
                 error="skill result was not valid JSON",
-                risk=manifest.risk, duration_ms=duration_ms,
+                risk=manifest.risk,
+                duration_ms=duration_ms,
             )
+        if not isinstance(payload, dict):
+            return SkillResult(
+                skill_slug=manifest.slug,
+                ok=False,
+                delivered=False,
+                error="skill result must be a JSON object",
+                risk=manifest.risk,
+                duration_ms=duration_ms,
+            )
+
+        safe_payload = _redact_secrets(payload, secret_values)
         return SkillResult(
             skill_slug=manifest.slug,
             ok=bool(payload.get("ok")),
             delivered=bool(payload.get("ok")),
-            output={k: v for k, v in payload.items() if k != "ok"},
+            output={key: value for key, value in safe_payload.items() if key != "ok"},
+            # Do not trust payload['verified']; generated code is not a verifier.
+            verified=False,
             risk=manifest.risk,
             duration_ms=duration_ms,
         )
@@ -162,11 +244,9 @@ def explain_skill(
     if record is None:
         return [f"skill '{slug}' is not registered"]
     if validator_problems:
-        reasons.extend(f"validation failed: {p}" for p in validator_problems)
+        reasons.extend(f"validation failed: {problem}" for problem in validator_problems)
     if missing_capabilities:
-        reasons.append(
-            "missing capabilities: " + ", ".join(missing_capabilities)
-        )
+        reasons.append("missing capabilities: " + ", ".join(missing_capabilities))
     if record.state == "awaiting_approval":
         reasons.append("awaiting human approval (activation brief available)")
     elif record.state != "active":
