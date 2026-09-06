@@ -247,6 +247,24 @@ def _write_environment(out_dir: Path, capabilities: dict) -> None:
 
 
 # -.-.-.-
+def _browser_capability_summary(capabilities: Mapping[str, object]) -> str:
+    browsers = capabilities.get("browsers_available")
+    if not isinstance(browsers, Mapping):
+        return "(nenhum detectado)"
+    available = [str(name) for name, enabled in browsers.items() if bool(enabled)]
+    return ", ".join(available) or "(nenhum detectado)"
+
+
+# -.-.-.-
+def _optional_dependency_summary(capabilities: Mapping[str, object]) -> str:
+    optional = capabilities.get("optional_dependencies")
+    if not isinstance(optional, Mapping):
+        return "(nenhuma)"
+    available = [str(name) for name, enabled in optional.items() if bool(enabled)]
+    return ", ".join(available) or "(nenhuma)"
+
+
+# -.-.-.-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -272,15 +290,13 @@ def main() -> int:
         f"monitores: {capabilities['monitor_count']} · "
         f"negativos: {capabilities['negative_coordinates']}"
     )
+    print(f"browsers instalados detectados: {_browser_capability_summary(capabilities)}")
     print(
-        f"chrome: {capabilities['chrome_available']} · "
-        f"edge: {capabilities['edge_available']}"
+        "motor dos testes browser: "
+        f"{capabilities.get('browser_test_engine', 'desconhecido')} "
+        "(independente do browser pessoal)"
     )
-    optional = capabilities.get("optional_dependencies") or {}
-    print(
-        "opcional: "
-        + (", ".join(key for key, value in optional.items() if value) or "(nenhuma)")
-    )
+    print(f"opcional: {_optional_dependency_summary(capabilities)}")
 
     physical_gate = _physical_gate()
     if not physical_gate:
