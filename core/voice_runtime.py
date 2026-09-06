@@ -85,7 +85,12 @@ class BargeInGate:
 
 
 class VoiceLatency:
-    """Bounded client-side latency milestones (V3). Timestamps only."""
+    """Bounded client-side latency milestones (V3/V5). Timestamps only.
+
+    Honest limitation: there is NO local VAD, so "last_user_audio" marks
+    the LAST CAPTURED MIC FRAME, not a proven end-of-speech. Server-side
+    VAD owns the real end-of-turn signal.
+    """
 
     MILESTONES = (
         "last_user_audio",
@@ -129,11 +134,15 @@ class VoiceLatency:
         def delta(a: float | None, b: float | None) -> float | None:
             return None if a is None or b is None else round(b - a, 3)
 
+        # V5: without local VAD there is NO proven end-of-speech — the
+        # mic-frame milestone is the LAST CAPTURED FRAME, not the end of
+        # speech. Name it accordingly and never report it as
+        # "after end of speech".
         return {
             "transcription_latency_ms": _ms(delta(last_user, transcription)),
             "route_to_agent_ms": _ms(delta(transcription, agent)),
             "agent_to_first_action_ms": _ms(delta(agent, first_action)),
-            "last_user_audio_to_first_audio_ms": _ms(delta(last_user, first_audio)),
+            "last_mic_frame_to_first_audio_ms": _ms(delta(last_user, first_audio)),
         }
 
 

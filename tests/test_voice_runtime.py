@@ -64,7 +64,7 @@ class VoiceLatencyTests(unittest.TestCase):
         latency = VoiceLatency()
         latency.mark("first_response_audio", 10.0)
         latency.mark("first_response_audio", 20.0)
-        self.assertEqual(latency.snapshot()["last_user_audio_to_first_audio_ms"], None)
+        self.assertEqual(latency.snapshot()["last_mic_frame_to_first_audio_ms"], None)
         # direct check via marks through behaviour: snapshot only exposes deltas
 
     def test_snapshot_durations(self):
@@ -78,7 +78,7 @@ class VoiceLatencyTests(unittest.TestCase):
         self.assertAlmostEqual(snap["transcription_latency_ms"], 400.0)
         self.assertAlmostEqual(snap["route_to_agent_ms"], 500.0)
         self.assertAlmostEqual(snap["agent_to_first_action_ms"], 500.0)
-        self.assertAlmostEqual(snap["last_user_audio_to_first_audio_ms"], 2000.0)
+        self.assertAlmostEqual(snap["last_mic_frame_to_first_audio_ms"], 2000.0)
 
     def test_new_turn_clears_marks(self):
         latency = VoiceLatency()

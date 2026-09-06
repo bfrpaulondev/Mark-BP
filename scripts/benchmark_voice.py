@@ -19,9 +19,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.voice_runtime import percentile  # noqa: E402
 
+# V5: "last_mic_frame" is NOT a proven end-of-speech (no local VAD) —
+# treat its p95 as a LOWER BOUND proxy for the audible-response target.
 TARGETS = {
     "route_to_agent_ms": 1000.0,          # deterministic dispatch p95 < 1s após transcrição
-    "last_user_audio_to_first_audio_ms": 3000.0,  # simple audible response p95 < 3s
+    "last_mic_frame_to_first_audio_ms": 3000.0,  # proxy (lower bound) para resposta audível p95 < 3s
 }
 
 

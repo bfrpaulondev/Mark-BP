@@ -595,7 +595,7 @@ class AntonellaRuntime:
         self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
-        self._interrupted          = False   # True while draining audio after user interrupt
+        self._interrupted_event    = threading.Event()  # V3: coordinated cross-thread interrupt state
         self.ui.on_text_command   = self._on_text_command
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
@@ -676,9 +676,31 @@ class AntonellaRuntime:
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
 
+    def request_interrupt(self) -> None:
+        """V1/V3: thread-safe entry point for interrupt requests.
+
+        The sounddevice callback thread must NOT touch the asyncio queue
+        directly; it only signals here, and the drain runs inside the
+        event loop when this method is invoked from it.
+        """
+        self._interrupted_event.set()
+        self._audio_turn.advance()  # queued/in-flight audio becomes stale
+        loop = self._loop
+        if loop is None:
+            self.interrupt()  # no live loop: nothing asyncio-owned to touch
+            return
+        try:
+            asyncio.get_running_loop()
+            self.interrupt()  # already on the event loop
+        except RuntimeError:
+            loop.call_soon_threadsafe(self.interrupt)  # off-loop: schedule
+
     def interrupt(self) -> None:
-        """Stop assistant speech: drain queued audio and open mic immediately."""
-        self._interrupted = True
+        """Stop assistant speech: drain queued audio and open mic immediately.
+
+        Event-loop-owned: drains the asyncio queue and flips coordinated
+        state. Other threads call ``request_interrupt()`` instead."""
+        self._interrupted_event.set()
         self._audio_turn.advance()  # V2: queued/in-flight audio becomes stale
         q = self.audio_in_queue
         if q:
@@ -710,7 +732,7 @@ class AntonellaRuntime:
     def speak_error(self, tool_name: str, error: str):
         short = str(error)[:120]
         self.ui.write_log(f"ERR: {tool_name} — {short}")
-        self.speak(f"Sir, {tool_name} encountered an error. {short}")
+        self.speak(f"Não consegui concluir {tool_name}. {short}")
 
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
@@ -993,7 +1015,10 @@ class AntonellaRuntime:
                 import audioop
 
                 if self._barge_gate.feed(audioop.rms(data, 2), time.monotonic()):
-                    self.interrupt()
+                    # V1: the sounddevice thread NEVER drains the asyncio
+                    # queue itself — it only requests the interrupt, and
+                    # request_interrupt() hands it to the event loop.
+                    self.request_interrupt()
                 return
             if not self.ui.muted and not self._phone_active:
                 self.voice_latency.mark("last_user_audio")
@@ -1026,7 +1051,7 @@ class AntonellaRuntime:
                 async for response in self.session.receive():
 
                     if response.data:
-                        if self._interrupted:
+                        if self._interrupted_event.is_set():
                             pass  # discard: interrupted
                         else:
                             if self._turn_done_event and self._turn_done_event.is_set():
@@ -1068,11 +1093,14 @@ class AntonellaRuntime:
                         if sc.turn_complete:
                             if self._turn_done_event:
                                 self._turn_done_event.set()
+                            # V4: the finished turn's metrics are final;
+                            # the next turn starts with clean milestones.
+                            self.voice_latency.new_turn()
 
                             # If this turn_complete ends an interrupted response, clear the
                             # flag and skip all further processing for that turn.
-                            if self._interrupted:
-                                self._interrupted = False
+                            if self._interrupted_event.is_set():
+                                self._interrupted_event.clear()
                                 in_buf  = []
                                 out_buf = []
                                 continue
@@ -1095,7 +1123,7 @@ class AntonellaRuntime:
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
                                 if self._dashboard:
                                     asyncio.create_task(self._dashboard.broadcast({
-                                        "type": "log", "speaker": "jarvis",
+                                        "type": "log", "speaker": "antonella",
                                         "text": full_out,
                                         "ts": datetime.now().isoformat(),
                                     }))
@@ -1179,21 +1207,11 @@ class AntonellaRuntime:
 
                 self.set_speaking(True)
 
-                # Batch all immediately-available chunks into one write to reduce
-                # thread-pool round-trips (was one asyncio.to_thread per 50ms slice).
-                # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
-                batch = bytearray(chunk)
-                while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    try:
-                        _more_token, _more = self.audio_in_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    if not self._audio_turn.is_current(_more_token):
-                        break  # a newer turn invalidated this batch
-                    batch.extend(_more)
-
+                # V2: batching is removed until provably safe — writing the
+                # ~50 ms chunk as-is keeps interrupt latency within one
+                # chunk and can never mix turns in a single write.
                 try:
-                    await asyncio.to_thread(stream.write, bytes(batch))
+                    await asyncio.to_thread(stream.write, chunk)
                 except (RuntimeError, asyncio.CancelledError):
                     break   # executor shutting down — exit cleanly
         except Exception as e:
@@ -1562,7 +1580,7 @@ class AntonellaRuntime:
                     self._vision_close_pending = False
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
-                    self._interrupted          = False
+                    self._interrupted_event.clear()
 
                     print("[Antonella] Connected.")
                     self.ui.set_state("LISTENING")
