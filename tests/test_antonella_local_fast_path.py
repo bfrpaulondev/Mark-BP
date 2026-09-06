@@ -7,9 +7,13 @@ class AntonellaLocalFastPathTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         source = (root / "antonella.py").read_text(encoding="utf-8")
 
-        self.assertIn("parse_local_text_command(text)", source)
+        parse_call = "intent = parse_local_text_command(text)"
+        live_fallback = 'self._schedule_realtime_text(text, label="text input")'
+
+        self.assertIn(parse_call, source)
         self.assertIn("execute_local_intent", source)
-        self.assertIn("super()._on_text_command(text)", source)
+        self.assertIn(live_fallback, source)
+        self.assertLess(source.index(parse_call), source.index(live_fallback))
         self.assertIn("fast path local", source)
         self.assertIn("antonella-local-", source)
 
