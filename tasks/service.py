@@ -20,9 +20,16 @@ StateVerifier = Callable[[TaskStep], dict]  # returns {"completed": bool, ...}
 
 
 class TaskService:
-    def __init__(self, *, store: TaskStore, clock: Callable[[], float] = time.time):
+    def __init__(
+        self,
+        *,
+        store: TaskStore,
+        clock: Callable[[], float] = time.time,
+        approval_manager=None,
+    ):
         self._store = store
         self._clock = clock
+        self._approval_manager = approval_manager
 
     # -.-.-.-
     def create(
@@ -53,15 +60,31 @@ class TaskService:
         return task
 
     # -.-.-.-
-    def approve(self, task_id: str, *, owner_id: str) -> Task:
-        """F13/T3: approval is explicit and does not linger — the runner
-        consumes the canonical one-use grant in the same cycle. The grant
-        itself lives in the HumanApprovalManager (in-memory by design):
-        after a restart it cannot be proven and the dangerous step
-        re-requests approval instead of running."""
+    def approve(self, task_id: str, *, owner_id: str, approval_manager=None) -> Task:
+        """Approve the currently pending task gate.
+
+        Dangerous steps use the canonical ``HumanApprovalManager`` request
+        created by ``TaskRunner``. This method must approve that exact
+        request; merely flipping persisted task state is not authorization.
+        Safe legacy task-level approval without a bound dangerous request is
+        retained for compatibility, but a dangerous task can never bypass
+        the action-bound grant path.
+        """
         task = self._require(task_id, owner_id)
         if task.state is not TaskState.AWAITING_APPROVAL:
             raise ValueError(f"task is not awaiting approval (state={task.state.value})")
+
+        manager = approval_manager or self._approval_manager
+        dangerous = any(step.risk == "dangerous" and step.state != "done" for step in task.steps)
+        if task.approval_request_id:
+            if manager is None:
+                raise ValueError("canonical approval manager is required for this task")
+            if not manager.approve(task.approval_request_id):
+                raise ValueError("approval request is unknown or expired")
+            task.approval_request_id = None
+        elif dangerous:
+            raise ValueError("dangerous task has no action-bound approval request")
+
         task.state = TaskState.CREATED
         task.updated_at = self._clock()
         self._store.save_task(task)
