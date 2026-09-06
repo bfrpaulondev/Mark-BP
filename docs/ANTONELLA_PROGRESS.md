@@ -7,23 +7,6 @@
 **Main consolidada antes desta PR de documentação:** `674c3ee6d1846fb938ec6e3f65280e359896f413`  
 **Critério central:** quando consegue, prova; quando não consegue, sabe que não conseguiu e não inventa sucesso.
 
-## ANT-275 em revisão — PR #86
-
-Follow-up do review do Principal sobre `f4ec40e5df23853333a308514ceeab90f62b3e4f`, na branch `glm/ant-275-physical-fixes`, sem merge:
-
-- Os quatro campos de barge-in pertencem a `AntonellaSettings` e são materializados por `load_config()`. Defaults desktop: `True / 900 / 3 / 2.0`; precedência canónica `env > config legado > defaults`. Valores inválidos são rejeitados pela validação tipada.
-- O runtime chama `get_config()` uma vez. `BargeInSettings` apenas transporta os valores já resolvidos; não lê ambiente nem fornece defaults alternativos.
-- O teste de arranque restaura os shims de `sys.modules` em `finally`, preserva entradas existentes e falha nos jobs Qt se o runtime não importar. Há regressões para sucesso, falha de importação e dependência transitiva ausente.
-- Os jobs Qt instalam também `numpy`, `playwright` e `psutil`, já usados pelo runtime, para executar a construção real e a concorrência sem skips causados por imports em falta.
-- As fixtures de arranque e layout usam uma chave sintética apenas durante a construção da janela, evitando diálogos interactivos durante os testes. Todas as assertions de UI são mantidas; os shims de anotações rejeitam qualquer tentativa de executar código do provider.
-- O fallback pycaw usa o GUID em `Activate` e o tipo `IAudioEndpointVolume` em `QueryInterface`; o caminho moderno `EndpointVolume` continua prioritário.
-- `Any` é importado explicitamente e retirado da whitelist. O audit é descrito como heurístico, com limitações de scope; o import de `get_config` ao nível do módulo e a construção real do runtime são os gates principais.
-- Preservados: WindowSpecification, centro RECT pelas coordenadas, VOICE 4 dependente de barge-in PASS, wording do benchmark, agendamento thread-safe da interrupção, locks e invalidação de turnos stale.
-
-Validação local Python 3.12: 805/805 testes PASS com Qt, sem skips; baseline com 805 testes, 771 PASS e 34 skips de dependências opcionais; compileall, import smoke, lockfile/export e 21 estados visuais offscreen PASS. A matriz CI Linux/Windows Python 3.11/3.12 + Qt deve correr no novo HEAD; os resultados e o run id final ficam na descrição do PR.
-
-**NOT PHYSICALLY RE-TESTED**: este follow-up não altera o resultado da ronda física anterior. Barge-in, speaker bleed, falsos positivos, latência audível e acceptance interactiva continuam dependentes de nova ronda real no Windows.
-
 ## Resumo operacional
 
 | Área | Estado |
