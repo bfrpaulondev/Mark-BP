@@ -25,9 +25,15 @@ from scripts.windows_e2e import matrix as e2e_matrix  # noqa: E402
 from scripts.windows_e2e.capability_probe import probe  # noqa: E402
 from scripts.windows_e2e.evidence import EvidenceBundle, EvidenceRecord  # noqa: E402
 
-# Executors are registered by physical sessions as they are implemented:
+# Physical executors (BLOCO 8) are merged into the registry:
 # {case_id: callable(capabilities) -> (result_dict, evidence_dict)}
-EXECUTORS: dict[str, Any] = {}
+from scripts.windows_e2e.executors import EXECUTORS as PHYSICAL_EXECUTORS  # noqa: E402
+
+EXECUTORS: dict[str, Any] = dict(PHYSICAL_EXECUTORS)
+
+
+class SkipCase(Exception):
+    """Environment not prepared for the case — reported as SKIPPED."""
 
 
 def _requirement_missing(requirement: str, capabilities: dict) -> bool:
@@ -81,6 +87,15 @@ def run(out_dir: Path, capabilities: dict | None = None) -> EvidenceBundle:
             result, evidence = executor(capabilities)
             status = "PASS" if result.get("verified") and result.get("ok") else "FAIL"
             bundle.add(EvidenceRecord(case_id=case.case_id, status=status, result=result, evidence=evidence))
+        except SkipCase as exc:
+            # Environment not prepared — honest SKIPPED, never converted to PASS.
+            bundle.add(
+                EvidenceRecord(
+                    case_id=case.case_id,
+                    status="SKIPPED",
+                    result={"error_type": "skipped", "reason": str(exc)[:80]},
+                )
+            )
         except Exception as exc:  # noqa: BLE001 - a crash is a FAIL, never a pass
             bundle.add(
                 EvidenceRecord(
