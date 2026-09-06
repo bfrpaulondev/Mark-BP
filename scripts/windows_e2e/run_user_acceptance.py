@@ -17,7 +17,9 @@ TESTED and interactive hardware checks are not started.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -92,11 +94,40 @@ def _physical_gate(
 
 # -.-.-.-
 def _launch_antonella(root: Path) -> subprocess.Popen:
-    """Launch the canonical desktop entrypoint without a shell."""
+    """Launch the canonical desktop entrypoint and retain stderr only for early-failure diagnosis."""
     return subprocess.Popen(
         [sys.executable, str(root / "antonella.py")],
         cwd=str(root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
+
+
+# -.-.-.-
+def _sanitize_diagnostic(text: str, root: Path) -> str:
+    value = str(text or "")
+    for raw, replacement in ((str(root), "<repo>"), (str(Path.home()), "<home>")):
+        if raw:
+            value = value.replace(raw, replacement)
+            value = value.replace(raw.replace("\\", "/"), replacement)
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    value = " · ".join(lines[-3:]) if lines else ""
+    value = re.sub(r"\s+", " ", value).replace("|", "/").strip()
+    return value[:320]
+
+
+# -.-.-.-
+def _early_exit_detail(process: subprocess.Popen, root: Path) -> str:
+    if process.poll() is None:
+        return ""
+    try:
+        _stdout, stderr = process.communicate(timeout=2)
+    except Exception:
+        return f"exit_code={process.returncode}"
+    detail = _sanitize_diagnostic(stderr or "", root)
+    prefix = f"exit_code={process.returncode}"
+    return f"{prefix} · {detail}" if detail else prefix
 
 
 # -.-.-.-
@@ -192,7 +223,8 @@ def _write_acceptance(out_dir: Path, rows: list[dict], note: str | None = None) 
     for row in rows:
         label = row["status"]
         if row.get("reason"):
-            label += f" — {row['reason']}"
+            reason = " ".join(str(row["reason"]).replace("|", "/").split())[:360]
+            label += f" — {reason}"
         lines.append(f"| {row['case_id']} | {label} |")
     if not rows:
         lines.append("| (sem passos interactivos executados) | SKIPPED |")
@@ -203,6 +235,15 @@ def _write_acceptance(out_dir: Path, rows: list[dict], note: str | None = None) 
         ]
     )
     acceptance_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# -.-.-.-
+def _write_environment(out_dir: Path, capabilities: dict) -> None:
+    """Persist only the capability probe's technical, PII-free environment data."""
+    (out_dir / "environment.json").write_text(
+        json.dumps(capabilities, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 # -.-.-.-
@@ -224,6 +265,7 @@ def main() -> int:
     out_dir = root / "windows_e2e_reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     capabilities = probe()
+    _write_environment(out_dir, capabilities)
 
     print("=== CAPABILITIES (sem PII) ===")
     print(
@@ -273,12 +315,16 @@ def main() -> int:
 
             input("Quando a janela estiver pronta para voz, carrega ENTER para continuar: ")
             if launched is not None and launched.poll() is not None:
+                diagnostic = _early_exit_detail(launched, root)
+                reason = "Antonella process exited before interactive validation"
+                if diagnostic:
+                    reason += f" · {diagnostic}"
                 user_rows.append(
                     {
                         "case_id": "antonella-launch",
                         "status": "FAIL",
                         "timestamp": time.time(),
-                        "reason": "Antonella process exited before interactive validation",
+                        "reason": reason,
                     }
                 )
             else:

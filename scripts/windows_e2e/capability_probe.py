@@ -16,6 +16,7 @@ import json
 import os
 import platform
 import sys
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,35 @@ def _module_available(name: str) -> bool:
         return True
     except Exception:
         return False
+
+
+# -.-.-.-
+def _package_version(distribution: str) -> str | None:
+    """Return package version only; never expose install paths or metadata."""
+    try:
+        return metadata.version(distribution)
+    except metadata.PackageNotFoundError:
+        return None
+    except Exception:
+        return "unknown"
+
+
+# -.-.-.-
+def _known_package_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for distribution in (
+        "pywinauto",
+        "pycaw",
+        "comtypes",
+        "PyQt6",
+        "playwright",
+        "sounddevice",
+        "WMI",
+    ):
+        version = _package_version(distribution)
+        if version is not None:
+            versions[distribution.lower()] = version
+    return versions
 
 
 def _windows_monitors() -> list[dict[str, Any]]:
@@ -52,8 +82,6 @@ def _windows_monitors() -> list[dict[str, Any]]:
     monitors: list[dict[str, Any]] = []
     user32 = ctypes.windll.user32
 
-    # Win32 MONITORENUMPROC:
-    # BOOL CALLBACK MonitorEnumProc(HMONITOR, HDC, LPRECT, LPARAM)
     MONITORENUMPROC = ctypes.WINFUNCTYPE(
         ctypes.c_int,
         ctypes.c_void_p,
@@ -148,6 +176,7 @@ def probe() -> dict[str, Any]:
         "platform": sys.platform,
         "windows_version": platform.version() if sys.platform == "win32" else "",
         "python_version": platform.python_version(),
+        "package_versions": _known_package_versions(),
         "monitor_count": len(monitors),
         "monitors": monitors,
         "negative_coordinates": any(
@@ -165,7 +194,6 @@ def probe() -> dict[str, Any]:
         "edge_available": _browser_available("edge"),
         "microphone_available": _microphone_available(),
         **optional,
-        # CDP is opt-in by explicit configuration only.
         "cdp_available": bool(os.environ.get("ANTONELLA_E2E_CDP")),
     }
 

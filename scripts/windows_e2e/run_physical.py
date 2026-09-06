@@ -16,6 +16,7 @@ Honesty rules:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,24 @@ from scripts.windows_e2e.executors import (  # noqa: E402
 )
 
 EXECUTORS: dict[str, Any] = dict(PHYSICAL_EXECUTORS)
+ROOT = Path(__file__).resolve().parents[2]
+
+
+# -.-.-.-
+def _safe_error_detail(exc: BaseException, *, root: Path = ROOT) -> str:
+    """Return bounded technical diagnostics without local paths or multiline data."""
+    detail = str(exc) or type(exc).__name__
+    replacements = (
+        (str(root), "<repo>"),
+        (str(Path.home()), "<home>"),
+    )
+    for raw, replacement in replacements:
+        if raw:
+            detail = detail.replace(raw, replacement)
+            detail = detail.replace(raw.replace("\\", "/"), replacement)
+    detail = re.sub(r"\s+", " ", detail).strip()
+    detail = detail.replace("|", "/")
+    return detail[:180] or type(exc).__name__
 
 
 def _requirement_missing(requirement: str, capabilities: dict) -> bool:
@@ -57,8 +76,6 @@ def run(out_dir: Path, capabilities: dict | None = None) -> EvidenceBundle:
     bundle = EvidenceBundle()
 
     for case in e2e_matrix.CASES:
-        # No physical gate means no physical claim at all. Capability probing
-        # must not turn an unexecuted CI case into NOT AVAILABLE.
         if not physical_gate:
             bundle.add(
                 EvidenceRecord(
@@ -116,7 +133,7 @@ def run(out_dir: Path, capabilities: dict | None = None) -> EvidenceBundle:
                     status="SKIPPED",
                     result={
                         "error_type": "skipped",
-                        "reason": str(exc)[:80],
+                        "reason": _safe_error_detail(exc),
                     },
                 )
             )
@@ -130,6 +147,7 @@ def run(out_dir: Path, capabilities: dict | None = None) -> EvidenceBundle:
                         "delivered": False,
                         "verified": False,
                         "error_type": type(exc).__name__,
+                        "error_detail": _safe_error_detail(exc),
                     },
                 )
             )

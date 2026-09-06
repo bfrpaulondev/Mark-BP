@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,7 +34,31 @@ class WindowsUserAcceptanceTests(unittest.TestCase):
         self.assertEqual(args[0][0], acceptance.sys.executable)
         self.assertEqual(Path(args[0][1]), root / "antonella.py")
         self.assertEqual(Path(kwargs["cwd"]), root)
+        self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], subprocess.PIPE)
+        self.assertTrue(kwargs["text"])
         self.assertNotIn("shell", kwargs)
+
+    def test_startup_diagnostic_is_sanitized_and_bounded(self):
+        root = Path("C:/antonella")
+        raw = "Traceback\nC:/antonella/antonella.py\nAttributeError: broken | detail"
+        detail = acceptance._sanitize_diagnostic(raw, root)
+        self.assertNotIn("C:/antonella", detail)
+        self.assertIn("<repo>", detail)
+        self.assertNotIn("|", detail)
+        self.assertNotIn("\n", detail)
+        self.assertLessEqual(len(detail), 320)
+
+    def test_early_exit_detail_contains_exit_code_and_sanitized_stderr(self):
+        process = MagicMock()
+        process.poll.return_value = 1
+        process.returncode = 1
+        process.communicate.return_value = (None, "C:/antonella/main.py\nAttributeError: synthetic")
+        detail = acceptance._early_exit_detail(process, Path("C:/antonella"))
+        self.assertIn("exit_code=1", detail)
+        self.assertIn("<repo>", detail)
+        self.assertIn("AttributeError: synthetic", detail)
+        self.assertNotIn("C:/antonella", detail)
 
     def test_voice_metrics_row_fails_closed_when_runtime_file_is_missing(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -49,16 +75,37 @@ class WindowsUserAcceptanceTests(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=8)
         process.kill.assert_not_called()
 
-    def test_acceptance_report_contains_only_status_rows(self):
+    def test_acceptance_report_contains_status_and_bounded_reason(self):
         with tempfile.TemporaryDirectory() as temp:
             out_dir = Path(temp)
             acceptance._write_acceptance(
                 out_dir,
-                [{"case_id": "voice-capture", "status": "PASS", "timestamp": 1.0}],
+                [
+                    {
+                        "case_id": "antonella-launch",
+                        "status": "FAIL",
+                        "timestamp": 1.0,
+                        "reason": "exit_code=1 | AttributeError: synthetic",
+                    }
+                ],
             )
             text = (out_dir / "user_acceptance.md").read_text(encoding="utf-8")
-            self.assertIn("| voice-capture | PASS |", text)
+            self.assertIn("| antonella-launch | FAIL", text)
+            self.assertIn("exit_code=1 / AttributeError: synthetic", text)
             self.assertNotIn("timestamp", text)
+
+    def test_environment_report_contains_only_supplied_safe_probe_data(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out_dir = Path(temp)
+            capabilities = {
+                "platform": "win32",
+                "python_version": "3.12.1",
+                "package_versions": {"pywinauto": "0.6.9"},
+                "monitor_count": 2,
+            }
+            acceptance._write_environment(out_dir, capabilities)
+            data = json.loads((out_dir / "environment.json").read_text(encoding="utf-8"))
+            self.assertEqual(data, capabilities)
 
 
 if __name__ == "__main__":
