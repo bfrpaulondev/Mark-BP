@@ -101,7 +101,8 @@ def main() -> int:
     print("=== CAPABILITIES (sem PII) ===")
     print(f"monitores: {capabilities['monitor_count']} · negativos: {capabilities['negative_coordinates']}")
     print(f"chrome: {capabilities['chrome_available']} · edge: {capabilities['edge_available']}")
-    print(f"opcional: {', '.join(k for k, v in capabilities['optional_dependencies'].items() if v)}")
+    optional = capabilities.get("optional_dependencies") or {}
+    print(f"opcional: {', '.join(k for k, v in optional.items() if v) or '(nenhuma)'}")
 
     bundle = run_automated(out_dir, capabilities=capabilities)
     print("\n=== E2E AUTOMATIZADO CONCLUÍDO (report.md/report.json) ===")
