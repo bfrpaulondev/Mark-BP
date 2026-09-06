@@ -181,6 +181,11 @@ class AntonellaLive(AntonellaRuntime):
                     f"delivered={verification.delivered} · "
                     f"verified={verification.verified}"
                 )
+                # Keep the verifier's canonical success gate explicit at the
+                # fast-path boundary. Voice still comes from the shared
+                # feedback mapper, so this guard cannot invent a success.
+                if verification.can_claim_success:
+                    self.ui.write_log("SYS: verify · fast-path open_app · confirmed")
             feedback = local_command_feedback(result, verification)
             self.ui.write_log(f"{assistant_name}: {feedback.phrase_pt}")
             self._session_log.append(f"{assistant_name}: {feedback.phrase_pt}")
