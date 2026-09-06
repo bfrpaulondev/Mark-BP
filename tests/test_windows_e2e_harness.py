@@ -3,6 +3,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,25 +117,59 @@ class RunnerDryRunTests(unittest.TestCase):
             report = (Path(tmp) / "report.md").read_text(encoding="utf-8")
             self.assertIn("NOT PHYSICALLY TESTED", report)
 
-    def test_missing_capabilities_mark_case_not_available(self):
+    def test_missing_capabilities_are_only_not_available_on_physical_gate(self):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
-            bundle = runner_module.run(Path(tmp), capabilities={"pyqt6": False})
+            with mock.patch.dict(
+                runner_module.os.environ,
+                {"ANTONELLA_E2E_PHYSICAL": "1"},
+                clear=False,
+            ), mock.patch.object(runner_module.sys, "platform", "win32"):
+                bundle = runner_module.run(
+                    Path(tmp),
+                    capabilities={"pyqt6": False, "pywinauto": False},
+                )
             by_id = {record.case_id: record for record in bundle.records}
             self.assertEqual(by_id["app_launch"].status, "NOT AVAILABLE")
             self.assertIn("pyqt6", by_id["app_launch"].environment["missing"])
 
-    def test_monitor_count_requirement_comparison(self):
+    def test_monitor_count_requirement_comparison_on_physical_gate(self):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
-            bundle = runner_module.run(Path(tmp), capabilities={"monitor_count": 1})
-            by_id = {record.case_id: record for record in bundle.records}
-            self.assertEqual(by_id["multi_monitor"].status, "NOT AVAILABLE")
-            bundle2 = runner_module.run(Path(tmp), capabilities={"monitor_count": 3})
-            by_id2 = {record.case_id: record for record in bundle2.records}
-            self.assertEqual(by_id2["multi_monitor"].status, "NOT PHYSICALLY TESTED")
+            with mock.patch.dict(
+                runner_module.os.environ,
+                {"ANTONELLA_E2E_PHYSICAL": "1"},
+                clear=False,
+            ), mock.patch.object(runner_module.sys, "platform", "win32"):
+                bundle = runner_module.run(
+                    Path(tmp),
+                    capabilities={"monitor_count": 1},
+                )
+                by_id = {record.case_id: record for record in bundle.records}
+                self.assertEqual(by_id["multi_monitor"].status, "NOT AVAILABLE")
+
+                # With the requirement satisfied but no executor override,
+                # the real registered executor is not run here; replace it
+                # with a deterministic no-op verifier for this single case.
+                original = runner_module.EXECUTORS.get("multi_monitor")
+                runner_module.EXECUTORS["multi_monitor"] = lambda capabilities: (
+                    {"ok": True, "delivered": True, "verified": True},
+                    {},
+                )
+                try:
+                    bundle2 = runner_module.run(
+                        Path(tmp),
+                        capabilities={"monitor_count": 3},
+                    )
+                finally:
+                    if original is None:
+                        runner_module.EXECUTORS.pop("multi_monitor", None)
+                    else:
+                        runner_module.EXECUTORS["multi_monitor"] = original
+                by_id2 = {record.case_id: record for record in bundle2.records}
+                self.assertEqual(by_id2["multi_monitor"].status, "PASS")
 
 
 if __name__ == "__main__":
