@@ -52,7 +52,7 @@ def main() -> int:
         print(f"| {metric} | {len(values)} | {percentile(values, 50)} | {percentile(values, 95)} |")
     print(f"Completed, non-interrupted turns: {len(samples)}")
     print("True end-of-speech p95: NOT MEASURED (no trustworthy VAD/end-of-turn timestamp)")
-    print("Audible playback latency / physical barge-in: NOT PHYSICALLY TESTED")
+    print("Physical barge-in: NOT MEASURED BY THIS BENCHMARK (validar via run_user_acceptance.py)")
     return 0
 
 

@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import dataclass
 import json
 import os
 import tempfile
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 
 class TurnRegistry:
@@ -204,3 +206,30 @@ def percentile(values: list[float], pct: float) -> float | None:
         max(0, round((pct / 100.0) * (len(ordered) - 1))),
     )
     return ordered[index]
+
+
+# ---------------------------------------------------------------------------
+# Resolved barge-in values (ANT-275 physical round 2)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class BargeInSettings:
+    """Values already resolved and validated by config.settings.load_config.
+
+    Defaults, validation and environment precedence belong exclusively to
+    AntonellaSettings. This value object only maps the canonical fields.
+    """
+
+    enabled: bool
+    threshold: int
+    frames_above: int
+    cooldown_seconds: float
+
+    # -.-.-.-
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "BargeInSettings":
+        return cls(
+            enabled=config["barge_in_enabled"],
+            threshold=config["barge_in_threshold"],
+            frames_above=config["barge_in_frames"],
+            cooldown_seconds=config["barge_in_cooldown"],
+        )

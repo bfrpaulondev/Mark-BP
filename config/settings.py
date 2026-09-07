@@ -46,6 +46,10 @@ class AntonellaSettings(BaseSettings):
     user_name: str = ""
     voice_name: str = "Kore"
     voice_style: str = "feminine, warm, natural, calm, confident, concise and conversational"
+    barge_in_enabled: bool = True
+    barge_in_threshold: int = Field(default=900, ge=0)
+    barge_in_frames: int = Field(default=3, ge=1)
+    barge_in_cooldown: float = Field(default=2.0, ge=0, allow_inf_nan=False)
     morning_brief_enabled: bool = True
     plugins_enabled: dict[str, bool] = Field(default_factory=dict)
     ui_color: str = ""
@@ -201,6 +205,10 @@ def load_config(config_file: Path = CONFIG_FILE) -> dict[str, Any]:
             "user_name": settings.user_name,
             "voice_name": settings.voice_name,
             "voice_style": settings.voice_style,
+            "barge_in_enabled": settings.barge_in_enabled,
+            "barge_in_threshold": settings.barge_in_threshold,
+            "barge_in_frames": settings.barge_in_frames,
+            "barge_in_cooldown": settings.barge_in_cooldown,
             "morning_brief_enabled": settings.morning_brief_enabled,
             "plugins_enabled": settings.plugins_enabled,
             "ui_color": settings.ui_color,

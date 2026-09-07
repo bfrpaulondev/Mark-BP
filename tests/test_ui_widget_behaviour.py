@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -200,7 +201,9 @@ class MainWindowClampTests(unittest.TestCase):
         cls._window_cls = AntonellaWindow
 
     def setUp(self):
-        self.window = self._window_cls()
+        # These layout tests must not schedule the interactive key setup dialog.
+        with patch("ui.get_gemini_key", return_value="synthetic-widget-test-key"):
+            self.window = self._window_cls()
         self.window.resize(400, 300)
         self.window.show()
 

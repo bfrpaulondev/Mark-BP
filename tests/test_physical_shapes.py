@@ -1,0 +1,125 @@
+"""ANT-275 physical round 2 — dependency-light regressions for the real
+API shapes found on Windows: pywinauto 0.6.9 (no child_window on raw
+UIAWrapper, no RECT.middle_point) and pycaw 20251023 (modern
+EndpointVolume attribute with legacy Activate fallback)."""
+
+import unittest
+import sys
+import types
+from unittest.mock import Mock, patch
+
+from scripts.windows_e2e.executors import _endpoint_from_device, _endpoint_volume, _rect_center
+from scripts.windows_e2e.evidence import EvidenceRecord
+
+
+class FakeRect:
+    """pywinauto 0.6.9 RECT: coordinates only, no middle_point()."""
+
+    def __init__(self, left, top, right, bottom):
+        self.left, self.top, self.right, self.bottom = left, top, right, bottom
+
+
+class _SpecWindow:
+    """WindowSpecification-like: HAS child_window."""
+
+    def __init__(self):
+        self.child_window_called = None
+
+    def child_window(self, **kwargs):
+        self.child_window_called = kwargs
+        return "control"
+
+
+class _RawWrapper:
+    """UIAWrapper-like: NO child_window attribute (0.6.9 real shape)."""
+
+    def set_focus(self):
+        pass
+
+
+class RectCenterTests(unittest.TestCase):
+    def test_center_computed_from_edges_without_middle_point(self):
+        rect = FakeRect(100, 50, 300, 250)
+        self.assertEqual(_rect_center(rect), (200, 150))
+
+    def test_center_works_with_negative_coordinates(self):
+        rect = FakeRect(-300, -250, -100, -50)
+        self.assertEqual(_rect_center(rect), (-200, -150))
+
+
+class PycawShapeTests(unittest.TestCase):
+    def test_modern_endpoint_volume_attribute_is_used(self):
+        endpoint = object()  # modern shape: attribute IS the endpoint
+        iid_marker = object()
+
+        class _ModernDevice:
+            EndpointVolume = endpoint
+            Activate = Mock(side_effect=AssertionError("modern devices must not use Activate"))
+
+        self.assertIs(_endpoint_from_device(_ModernDevice(), iid_marker, object, "fake-ctx"), endpoint)
+        _ModernDevice.Activate.assert_not_called()
+
+    def test_legacy_activate_fallback(self):
+        class _EndpointVolume:
+            _iid_ = object()
+
+        endpoint = object()
+        interface = Mock()
+        interface.QueryInterface.return_value = endpoint
+        device = Mock(spec=["Activate"])
+        device.Activate.return_value = interface
+        self.assertIs(_endpoint_from_device(
+            device, _EndpointVolume._iid_, _EndpointVolume, "fake-ctx"
+        ), endpoint)
+        device.Activate.assert_called_once_with(_EndpointVolume._iid_, "fake-ctx", None)
+        interface.QueryInterface.assert_called_once_with(_EndpointVolume)
+
+    # -.-.-.-
+    def test_executor_passes_distinct_guid_and_interface_type(self):
+        class _EndpointVolume:
+            _iid_ = object()
+
+        device = object()
+        comtypes = types.ModuleType("comtypes")
+        comtypes.CLSCTX_ALL = object()
+        pycaw = types.ModuleType("pycaw.pycaw")
+        pycaw.IAudioEndpointVolume = _EndpointVolume
+        pycaw.AudioUtilities = types.SimpleNamespace(GetSpeakers=lambda: device)
+        with patch.dict(sys.modules, {
+            "comtypes": comtypes, "pycaw": types.ModuleType("pycaw"), "pycaw.pycaw": pycaw,
+        }), patch("scripts.windows_e2e.executors._endpoint_from_device") as select:
+            self.assertIs(_endpoint_volume(), select.return_value)
+        select.assert_called_once_with(device, _EndpointVolume._iid_, _EndpointVolume, comtypes.CLSCTX_ALL)
+
+
+class UiaSelectorTests(unittest.TestCase):
+    def test_spec_root_supports_child_window(self):
+        spec = _SpecWindow()
+        control = spec.child_window(title="Mudar título", control_type="Button")
+        self.assertEqual(control, "control")
+        self.assertEqual(spec.child_window_called, {"title": "Mudar título", "control_type": "Button"})
+
+    def test_raw_wrapper_shape_is_documented_as_unsupported(self):
+        # The 0.6.9 finding: a raw UIAWrapper lacks child_window. The
+        # executor must therefore always store the WindowSpecification.
+        wrapper = _RawWrapper()
+        self.assertFalse(hasattr(wrapper, "child_window"))
+
+    def test_executor_source_uses_spec_as_selector_root(self):
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[1] / "scripts" / "windows_e2e" / "executors.py").read_text(encoding="utf-8")
+        self.assertIn('.window(title=FIXTURE_TITLE)', source)
+        self.assertNotIn('self._win = windows[0]', source)
+
+
+class EvidenceShapeTests(unittest.TestCase):
+    def test_volume_evidence_shape_unchanged(self):
+        record = EvidenceRecord(
+            case_id="volume", status="PASS", result={"ok": True}, evidence={"ok": True}
+        )
+        self.assertEqual(record.evidence, {"ok": True})
+
+
+if __name__ == "__main__":
+    unittest.main()

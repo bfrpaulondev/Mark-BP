@@ -93,7 +93,10 @@ class FixtureApp:
         while time.time() < deadline:
             windows = Desktop(backend="uia").windows(title=FIXTURE_TITLE)
             if windows:
-                self._win = windows[0]
+                # pywinauto 0.6.9: a raw UIAWrapper has no child_window().
+                # Store the WindowSpecification as the selector root so
+                # child_window-based lookups keep working.
+                self._win = Desktop(backend="uia").window(title=FIXTURE_TITLE)
                 self._win.set_focus()
                 return self
             if self._proc.poll() is not None:
@@ -122,6 +125,12 @@ class FixtureApp:
 
         windows = Desktop(backend="uia").windows(title_re=f"{FIXTURE_TITLE}.*")
         return windows[0].window_text() if windows else ""
+
+
+# -.-.-.-
+def _rect_center(rect) -> tuple[int, int]:
+    """pywinauto 0.6.9 RECT has no middle_point() — compute from edges."""
+    return (int((rect.left + rect.right) // 2), int((rect.top + rect.bottom) // 2))
 
 
 # -.-.-.-
@@ -185,8 +194,7 @@ def _exec_mouse_move(_capabilities: dict) -> tuple[dict, dict]:
 
     with FixtureApp() as fixture:
         rect = fixture.window.rectangle()
-        target_x = int(rect.middle_point().x)
-        target_y = int(rect.middle_point().y)
+        target_x, target_y = _rect_center(rect)
         pywinauto.mouse.move(coords=(target_x, target_y))
         time.sleep(0.1)
         point = wintypes.POINT()
@@ -232,8 +240,18 @@ def _endpoint_volume():
         raise SkipCase("pycaw/comtypes is not installed") from exc
 
     devices = AudioUtilities.GetSpeakers()
-    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    return interface.QueryInterface(IAudioEndpointVolume)
+    return _endpoint_from_device(devices, IAudioEndpointVolume._iid_, IAudioEndpointVolume, CLSCTX_ALL)
+
+
+# -.-.-.-
+def _endpoint_from_device(device, iid, interface_type, ctx):
+    """pycaw 20251023 exposes AudioDevice.EndpointVolume directly; older
+    versions require the COM Activate + QueryInterface dance."""
+    modern = getattr(device, "EndpointVolume", None)
+    if modern is not None:
+        return modern
+    interface = device.Activate(iid, ctx, None)
+    return interface.QueryInterface(interface_type)
 
 
 # -.-.-.-

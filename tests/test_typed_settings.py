@@ -4,6 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from typing import Any, get_type_hints
+
+from pydantic import ValidationError
+
+from core.voice_runtime import BargeInSettings
 
 from config.settings import (
     load_config,
@@ -135,6 +140,89 @@ class TypedSettingsTests(unittest.TestCase):
         )
         config = load_config(self.config_file)
         self.assertEqual(config["custom_legacy_value"], "keep-me")
+
+    # -.-.-.-
+    def test_barge_in_defaults_are_typed_and_materialized(self):
+        with patch.dict(os.environ, {}, clear=True):
+            settings = load_settings(self.config_file)
+            config = load_config(self.config_file)
+        expected = {
+            "barge_in_enabled": True, "barge_in_threshold": 900,
+            "barge_in_frames": 3, "barge_in_cooldown": 2.0,
+        }
+        for name, value in expected.items():
+            with self.subTest(name=name):
+                self.assertEqual(getattr(settings, name), value)
+                self.assertEqual(config[name], value)
+                self.assertIs(type(config[name]), type(value))
+
+    # -.-.-.-
+    def test_barge_in_legacy_values_are_validated_and_materialized(self):
+        self.config_file.write_text(json.dumps({
+            "barge_in_enabled": "false", "barge_in_threshold": "1200",
+            "barge_in_frames": "4", "barge_in_cooldown": "3.5",
+        }), encoding="utf-8")
+        with patch.dict(os.environ, {}, clear=True):
+            config = load_config(self.config_file)
+        self.assertIs(config["barge_in_enabled"], False)
+        self.assertEqual(config["barge_in_threshold"], 1200)
+        self.assertEqual(config["barge_in_frames"], 4)
+        self.assertEqual(config["barge_in_cooldown"], 3.5)
+
+    # -.-.-.-
+    def test_barge_in_environment_overrides_legacy_values(self):
+        self.config_file.write_text(json.dumps({
+            "barge_in_enabled": False, "barge_in_threshold": 1200,
+            "barge_in_frames": 4, "barge_in_cooldown": 3.5,
+        }), encoding="utf-8")
+        with patch.dict(os.environ, {
+            "ANTONELLA_BARGE_IN_ENABLED": "true",
+            "ANTONELLA_BARGE_IN_THRESHOLD": "1600",
+            "ANTONELLA_BARGE_IN_FRAMES": "6",
+            "ANTONELLA_BARGE_IN_COOLDOWN": "4.5",
+        }, clear=True):
+            config = load_config(self.config_file)
+        self.assertIs(config["barge_in_enabled"], True)
+        self.assertEqual(config["barge_in_threshold"], 1600)
+        self.assertEqual(config["barge_in_frames"], 6)
+        self.assertEqual(config["barge_in_cooldown"], 4.5)
+
+    # -.-.-.-
+    def test_invalid_barge_in_values_are_rejected_by_canonical_settings(self):
+        for field, value in (
+            ("barge_in_enabled", "sometimes"), ("barge_in_threshold", -1),
+            ("barge_in_threshold", "loud"), ("barge_in_frames", 0),
+            ("barge_in_frames", 1.5), ("barge_in_cooldown", -0.1),
+            ("barge_in_cooldown", "nan"), ("barge_in_cooldown", "inf"),
+        ):
+            for source in ("config", "environment"):
+                with self.subTest(field=field, value=value, source=source):
+                    self.config_file.write_text(json.dumps(
+                        {field: value} if source == "config" else {}
+                    ), encoding="utf-8")
+                    env = {f"ANTONELLA_{field.upper()}": str(value)} if source == "environment" else {}
+                    with patch.dict(os.environ, env, clear=True):
+                        with self.assertRaises(ValidationError):
+                            load_config(self.config_file)
+
+    # -.-.-.-
+    def test_barge_in_value_object_does_not_reresolve_environment_or_defaults(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = load_config(self.config_file)
+        with patch.dict(os.environ, {
+            "ANTONELLA_BARGE_IN_ENABLED": "false",
+            "ANTONELLA_BARGE_IN_THRESHOLD": "invalid",
+        }):
+            values = BargeInSettings.from_config(config)
+        self.assertEqual(values, BargeInSettings(True, 900, 3, 2.0))
+        with self.assertRaises(KeyError):
+            BargeInSettings.from_config({})
+
+    # -.-.-.-
+    def test_barge_in_annotations_resolve_without_implicit_any(self):
+        hints = get_type_hints(BargeInSettings.from_config)
+        self.assertEqual(hints["config"], dict[str, Any])
+        self.assertIs(hints["return"], BargeInSettings)
 
 
 if __name__ == "__main__":
